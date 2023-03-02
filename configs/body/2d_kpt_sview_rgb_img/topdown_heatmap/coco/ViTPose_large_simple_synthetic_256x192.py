@@ -1,4 +1,4 @@
-COCO_ROOT = "/datagrid/personal/purkrmir/data/COCO/original"
+COCO_ROOT = "/datagrid/personal/purkrmir/data/pose_experiments/synthetic/smplx/simplicity_1_distance_1.5/"
 BATCH_SIZE = 8
 
 _base_ = [
@@ -91,7 +91,7 @@ data_cfg = dict(
     vis_thr=0.2,
     use_gt_bbox=False,
     det_bbox_thr=0.0,
-    bbox_file=COCO_ROOT + '/annotations/person_keypoints_val2017.json',
+    bbox_file=COCO_ROOT + '/annotations/coco_annotations.json',
 )
 
 train_pipeline = [
@@ -160,14 +160,14 @@ data = dict(
         dataset_info={{_base_.dataset_info}}),
     val=dict(
         type='TopDownCocoDataset',
-        ann_file=f'{data_root}/annotations/person_keypoints_val2017.json',
+        ann_file=f'{data_root}/annotations/coco_annotations.json',
         img_prefix=f'{data_root}/val2017/',
         data_cfg=data_cfg,
         pipeline=val_pipeline,
         dataset_info={{_base_.dataset_info}}),
     test=dict(
         type='TopDownCocoDataset',
-        ann_file=f'{data_root}/annotations/person_keypoints_val2017.json',
+        ann_file=f'{data_root}/annotations/coco_annotations.json',
         img_prefix=f'{data_root}/val2017/',
         data_cfg=data_cfg,
         pipeline=test_pipeline,

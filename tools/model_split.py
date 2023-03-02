@@ -40,7 +40,7 @@ def main():
             value = torch.cat([value, experts[key.replace('fc2.', f'experts.{target_expert}.')]], dim=0)
             new_ckpt['state_dict'][key] = value
 
-    torch.save(new_ckpt, os.path.join(args.targetPath, 'coco.pth'))
+    torch.save(new_ckpt, os.path.join(args.target, 'coco.pth'))
 
     names = ['aic', 'mpii', 'ap10k', 'apt36k','wholebody']
     num_keypoints = [14, 16, 17, 17, 133]

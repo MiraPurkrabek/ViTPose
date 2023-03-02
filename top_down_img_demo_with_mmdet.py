@@ -182,13 +182,6 @@ def main():
             thickness=args.thickness,
             show=args.show,
             out_file=out_file)
-        
-        print("\r{:d}/{:d} ({:.2f}%)".format(
-            img_i+1,
-            len(images_names),
-            (img_i+1)/len(images_names)*100
-        ), end="")
-    print()
 
 
 if __name__ == '__main__':

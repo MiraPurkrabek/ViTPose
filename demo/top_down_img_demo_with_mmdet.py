@@ -136,6 +136,8 @@ def main():
     for img_i, image_name in enumerate(images_names):
         _, relative_image_name = os.path.split(image_name)
 
+        print("Processing image -", relative_image_name)
+
         # test a single image, the resulting box is (x1, y1, x2, y2)
         mmdet_results = inference_detector(det_model, image_name)
 

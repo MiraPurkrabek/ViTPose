@@ -202,15 +202,15 @@ def main():
 
     if not distributed:
         model = MMDataParallel(model, device_ids=[args.gpu_id])
-        outputs = single_gpu_test(model, data_loader)
+        outputs = single_gpu_test(model, data_loader, return_heatmaps=True)
     else:
         model = MMDistributedDataParallel(
             model.cuda(),
             device_ids=[torch.cuda.current_device()],
             broadcast_buffers=False)
         outputs = multi_gpu_test(model, data_loader, args.tmpdir,
-                                 args.gpu_collect)
-
+                                 args.gpu_collect, return_heatmaps=True)
+        
     rank, _ = get_dist_info()
     eval_config = cfg.get('evaluation', {})
     eval_config = merge_configs(eval_config, dict(metric=args.eval))
@@ -221,46 +221,119 @@ def main():
     # print(dataset.use_gt_bbox)
 
     if rank == 0:
+
         if args.out:
             print(f'\nwriting results to {args.out}')
             mmcv.dump(outputs, args.out)
 
-        results, wrong_images, oks_score = dataset.evaluate(outputs, cfg.work_dir, return_score=True, **eval_config)
+        results, wrong_images, oks_score, oks_sample_score = dataset.evaluate(outputs, cfg.work_dir, return_score=True, **eval_config)
+        
+        print("oks_score", oks_score.shape, np.mean(oks_score))
+        print("oks_sample_score", oks_sample_score.shape, np.mean(oks_sample_score))
+        print(np.isnan(oks_score).sum(), (oks_score <= 0).sum())
+        print(np.isnan(oks_sample_score).sum(), (oks_sample_score <= 0).sum())
 
-        # Save score histogram
-        plt.hist(oks_score, bins=100)
-        plt.savefig(os.path.join(cfg.work_dir, "test_score_histogram.png"))
+        valid_oks = oks_score[np.isnan(oks_score) == False]
+        print("valid_oks", valid_oks.shape, valid_oks.mean())
+
+        print(oks_score)
+        print(oks_score.shape, len(dataset.coco.dataset["annotations"]))
+        print(np.isnan(oks_score).sum(), (oks_score <= 0).sum(), (oks_score > 0).sum())
+
+        config_name = ".".join(os.path.basename(args.config).split(".")[:-1])
+        save_dir = os.path.join(
+            cfg.data_root,
+            # "test_all_visualization",
+            "test_visualization",
+            config_name,
+        )
 
         # Prepare datastructure
-        shutil.rmtree(osp.join(cfg.work_dir, "vis"), ignore_errors=True)
-        os.makedirs(osp.join(cfg.work_dir, "vis"), exist_ok=True)
+        shutil.rmtree(save_dir, ignore_errors=True)
+        os.makedirs(save_dir, exist_ok=True)
 
+        # Try to load dict with views
+        views_dict_path = os.path.join(cfg.data_root, "annotations", "views.json")
+        views_dict = None
+        if os.path.exists(views_dict_path) and os.path.isfile(views_dict_path):
+            views_dict = json.load(open(views_dict_path, "r"))
+
+        # If views dict loaded, add OKS score to it
+        if views_dict is not None:
+            for i, img_path in enumerate(wrong_images):
+                img_name = os.path.basename(img_path)
+                views_dict[img_name]["oks_score"] = oks_score[i]
+            
+            # Save views dict
+            views_dict_path = os.path.join(cfg.data_root, "annotations", "views_w_oks.json")
+            json.dump(views_dict, open(views_dict_path, "w"), indent=2)
+        else:
+            # Save OKS for each image for further eval
+            coco_dict_with_oks = dataset.coco.dataset.copy()
+            i = 0
+            for img in coco_dict_with_oks["images"]:
+                image_id = img["id"]
+                for ann in coco_dict_with_oks["annotations"]:
+                    if ann["image_id"] == image_id:
+                        ann["oks"] = float(oks_sample_score[i])
+                        i += 1
+            
+            # for i, ann in enumerate(coco_dict_with_oks["annotations"]):
+            #     ann["oks"] = float(oks_sample_score[i])
+            with open(os.path.join(cfg.data_root, "annotations", "coco_dict_with_oks.json"), "w") as f:
+                json.dump(coco_dict_with_oks, f, indent=2)
+
+        # Save score histogram
+        hist_oks_score = oks_score[oks_score <= 1]
+        hist_oks_score = hist_oks_score[hist_oks_score >= 0]
+        plt.hist(hist_oks_score, bins=100)
+        plt.savefig(os.path.join(save_dir, "test_score_histogram.png"))
 
         if not hasattr(dataset, "coco"):
             ann_dict = json.load(open("/datagrid/personal/purkrmir/data/MPII/annotations/_mpii_trainval_custom.json", "r"))
 
-        num_images = 100
+        num_images = 30
         indices_to_draw = np.geomspace(1, dataset.num_images, num=num_images) - 1
         indices_to_draw = np.unique(indices_to_draw.astype(int))
-        
-        print(oks_score[indices_to_draw])
+
+        # indices_to_draw = np.unique(list(range(dataset.num_images)))
         
         for i in indices_to_draw:
             image_path = wrong_images[i]
             image_name = osp.basename(image_path)
             pose_results = []
             gt_pose_results = []
+            gt_pose_vis = []
+            gt_pose_invis = []
+            heatmaps = []
             if hasattr(dataset, "coco"):
                 for ann in dataset.coco.dataset["annotations"]:
                     if ann["image_id"] == dataset.name2id[image_name]:
-                        kpt = np.array(ann["keypoints"])
-                        kpt = kpt[np.mod(np.arange(51), 3) != 2].reshape(17, 2)
-                        visibility = np.any(kpt > 0, axis=1).astype(float).reshape(17, 1)
-                        kpt = np.concatenate([kpt, visibility], axis=1)
+                        kpt = np.array(ann["keypoints"]).reshape(17, 3)
+                        visibility = kpt[:, -1]
+                        
+                        vis_kpt = kpt.copy()
+                        vis_kpt[visibility != 2, :] = 0
+                        
+                        invis_kpt = kpt.copy()
+                        invis_kpt[visibility != 1, :] = 0
+
+                        kpt[:, -1] = (kpt[:, -1] > 0).astype(int)
+                        invis_kpt[:, -1] = (invis_kpt[:, -1] > 0).astype(int)
+                        vis_kpt[:, -1] = (vis_kpt[:, -1] > 0).astype(int)
+                        
                         bbox_wh = np.array(ann["bbox"]).reshape(1, 4)
                         gt_pose_results.append({
                             "keypoints": kpt,
-                            "bbox": bbox_xywh2xyxy(bbox_wh)
+                            "bbox": bbox_xywh2xyxy(bbox_wh),
+                        })
+                        gt_pose_vis.append({
+                            "keypoints": vis_kpt,
+                            "bbox": bbox_xywh2xyxy(bbox_wh),
+                        })
+                        gt_pose_invis.append({
+                            "keypoints": invis_kpt,
+                            "bbox": bbox_xywh2xyxy(bbox_wh),
                         })
             else:
                 for gt in ann_dict[image_name]:
@@ -284,21 +357,56 @@ def main():
                         bbox_cs = batch["boxes"][ind, :4].reshape((1, 4))
                         bbox_wh = bbox_cs2xywh(bbox_cs[:, :2], bbox_cs[:, 2:], padding=1.0).reshape((1, 4))
                         bbox_xy = bbox_xywh2xyxy(bbox_wh).squeeze()
+                        
                         pose_results.append({
                             "keypoints": batch["preds"][ind, :, :],
                             "bbox": bbox_xy,
                         })
 
-            save_path = osp.join(cfg.work_dir, "vis", "{:02d}_vis_{}".format(i, image_name))
+                        heatmap = (batch["output_heatmap"][ind, :, :, :]).squeeze()
+                        heatmaps.append(heatmap)
+
+            # heatmaps = np.array(heatmaps)
+            # for joint_i in range(heatmaps.shape[1]):
+            #     save_path = osp.join(save_dir, "{:04d}_vis_heatmap_{:02d}_{}".format(i, joint_i, image_name))
+            #     joint_heatmap = (heatmaps[:, joint_i, :, :].squeeze()*255)
+            #     joint_heatmap = np.clip(joint_heatmap, 0, 255)#.astype(np.uint8)
+            #     joint_heatmap = cv2.resize(joint_heatmap, (np.array(joint_heatmap.shape) * 4).astype(int))
+            #     mmcv.image.imwrite(joint_heatmap, save_path)
+            #     print(save_path)
+            #     print("Joint {:d}, min {:.2f}, max {:.2f}, conf {:.2f}".format(
+            #         joint_i,
+            #         np.min(joint_heatmap),
+            #         np.max(joint_heatmap),
+            #         pose_results[0]["keypoints"][joint_i, -1] * 255
+            #     ))
+
+            save_path = osp.join(save_dir, "{:04d}_vis_{}".format(i, image_name))
             dataset_info = DatasetInfo(cfg.data['test'].get('dataset_info', None))
             
-            # Plot GT as GREEN
+            # Plot GT as GREEN 
             dataset_info.pose_link_color = [[0, 255, 0] for _ in range(len(dataset_info.pose_link_color))]
             dataset_info.pose_kpt_color = [[0, 255, 0] for _ in range(len(dataset_info.pose_kpt_color))]
-            vis_pose_result(
+            save_img = vis_pose_result(
                 model,
                 image_path,
                 gt_pose_results,
+                dataset=cfg.data['test']['type'],
+                dataset_info=dataset_info,
+                kpt_score_thr=0.3,
+                radius=4,
+                thickness=1,
+                bbox_color="green",
+                show=False,
+                out_file=None
+            )
+
+            # Plot invisible GT as BLUE 
+            dataset_info.pose_kpt_color = [[255, 0, 0] for _ in range(len(dataset_info.pose_kpt_color))]
+            vis_pose_result(
+                model,
+                save_img,
+                gt_pose_invis,
                 dataset=cfg.data['test']['type'],
                 dataset_info=dataset_info,
                 kpt_score_thr=0.3,
@@ -318,7 +426,7 @@ def main():
                 pose_results,
                 dataset=cfg.data['test']['type'],
                 dataset_info=dataset_info,
-                kpt_score_thr=0.3,
+                kpt_score_thr=cfg.data_cfg.vis_thr,
                 radius=4,
                 thickness=1,
                 bbox_color="red",

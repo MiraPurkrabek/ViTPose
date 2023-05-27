@@ -272,15 +272,15 @@ class COCOeval:
 
         tmp_ious = {key: value for key, value in tmp_ious.items() if len(value) > 0}
         evalImgs = [e for e in self.evalImgs if e is not None]
-        print()
-        print()
-        print("tmp_ious")
-        for e, k in zip(evalImgs, tmp_ious.keys()):
-            v = tmp_ious[k]
-            print("{}: {}\t\t{}, {}".format(k, v.shape, e["dtIds"], e["gtIds"]))
-        print()
-        # print(self.evalImgs)
-        print()
+        # print()
+        # print()
+        # print("tmp_ious")
+        # for e, k in zip(evalImgs, tmp_ious.keys()):
+        #     v = tmp_ious[k]
+        #     print("{}: {}\t\t{}, {}".format(k, v.shape, e["dtIds"], e["gtIds"]))
+        # print()
+        # # print(self.evalImgs)
+        # print()
 
         self._paramsEval = copy.deepcopy(self.params)
         toc = time.time()
@@ -390,6 +390,7 @@ class COCOeval:
                     d = np.array(dt['keypoints'])
 
                 xd = d[0::3]; yd = d[1::3]
+                det_conf = d[2::3]
                 if k1>0:
                     # measure the per-keypoint distance if keypoints visible
                     dx = xd - xg
@@ -405,17 +406,54 @@ class COCOeval:
                     dx = np.max((z, x0-xd),axis=0)+np.max((z, xd-x1),axis=0)
                     dy = np.max((z, y0-yd),axis=0)+np.max((z, yd-y1),axis=0)
 
+                # print("dx, dy", dx, dy)
+                keypoints = [
+                    "nose",
+                    "left eye",
+                    "right eye",
+                    "left ear",
+                    "right ear",
+                    "left shoulder",
+                    "right_shoulder",
+                    "left_elbow",
+                    "right_elbow",
+                    "left_wrist",
+                    "right_wrist",
+                    "left_hip",
+                    "right_hip",
+                    "left_knee",
+                    "right_knee",
+                    "left_ankle",
+                    "right_ankle"
+                ]
+                distance = dx**2 + dy**2
+                
                 if self.use_area:
                     e = (dx**2 + dy**2) / vars / (gt['area']+np.spacing(1)) / 2
+                    # print("area", gt["area"])
                 else:
                     tmparea = gt['bbox'][3] * gt['bbox'][2] * 0.53
+                    # print("tmparea", tmparea)
                     e = (dx**2 + dy**2) / vars / (tmparea+np.spacing(1)) / 2
 
+                # for index in range(len(keypoints)):
+                #     kpt = keypoints[index]
+                #     dst = distance[index]
+                #     ee = e[index]
+                #     print("\t{:s}\t\t{:.2f}\t\t{:.2f}\t{:.2f}".format(kpt, dst, ee, np.exp(-ee)))
+                
                 # print(self.use_area)
 
+                # Experiment with weighting OKS by confidence
+                # print("e before", e)
+                # e *= (1 - det_conf)
+                # print("e after", e)
+                
                 if k1 > 0:
                     e=e[vg > 0]
+                    # e=e[(vg > 0) & (det_conf > 0.3)]
                 ious[i, j] = np.sum(np.exp(-e)) / e.shape[0]
+                # print("OKS", np.sum(np.exp(-e)) / e.shape[0])
         return ious
 
     def computeOksPerKpt(self, imgId, catId):
@@ -650,6 +688,7 @@ class COCOeval:
         I0 = len(_pe.imgIds)
         A0 = len(_pe.areaRng)
         # retrieve E at each category, area range, and max number of detections
+        counter = 0
         for k, k0 in enumerate(k_list):
             Nk = k0*A0*I0
             for a, a0 in enumerate(a_list):
@@ -659,6 +698,9 @@ class COCOeval:
                     E = [e for e in E if not e is None]
                     if len(E) == 0:
                         continue
+                    # print(counter, Nk, Na, maxDet)
+                    counter += 1
+
                     dtScores = np.concatenate([e['dtScores'][0:maxDet] for e in E])
                     # different sorting method generates slightly different results.
                     # mergesort is used to be consistent as Matlab implementation.
@@ -676,12 +718,15 @@ class COCOeval:
                     fps = np.logical_and(dtm < 0, np.logical_not(dtIg))
                     tp_sum = np.cumsum(tps, axis=1).astype(dtype=np.float64)
                     fp_sum = np.cumsum(fps, axis=1).astype(dtype=np.float64)
+                    # print(tps.shape, fps.shape, tp_sum.shape, fp_sum.shape)
                     for t, (tp, fp) in enumerate(zip(tp_sum, fp_sum)):
                         tp = np.array(tp)
                         fp = np.array(fp)
                         nd = len(tp)
                         rc = tp / npig
                         pr = tp / (fp+tp+np.spacing(1))
+                        # print(nd, pr)
+                        # print(pr, rc)
                         q  = np.zeros((R,))
                         ss = np.zeros((R,))
 
@@ -715,6 +760,13 @@ class COCOeval:
             'recall':   recall,
             'scores': scores,
         }
+
+        # print("EvalImgs")
+        # print(self.evalImgs)
+
+        # print("scores")
+        # print(scores.shape)
+
         toc = time.time()
         print('DONE (t={:0.2f}s).'.format( toc-tic))
 
@@ -890,6 +942,8 @@ class Params:
         self.maxDets = [20]
         self.areaRng = [[0 ** 2, 1e5 ** 2], [32 ** 2, 96 ** 2], [96 ** 2, 1e5 ** 2]]
         self.areaRngLbl = ['all', 'medium', 'large']
+        # self.areaRng = [[0 ** 2, 1e5 ** 2]]
+        # self.areaRngLbl = ['all']
         self.useCats = 1
 
     def __init__(self, iouType='segm'):

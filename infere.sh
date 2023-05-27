@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-IN_DATA="../data/FACIS/nonsensitive_data/"
+IN_DATA="../data/pose_experiments/MMA"
+# IN_DATA="../smplx/sampled_poses/distance_2.0_simplicity_3.0_view_TOP_rotation_000/"
 
 DET_MODEL="htc"
 
@@ -20,9 +21,10 @@ elif [ "$DET_MODEL" == "mask2former" ]; then
 fi
 
 POSE_CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_large_simple_coco_256x192.py"
+# POSE_PTH="work_dirs/ViTPose_large_simple_TOP_synthetic_256x192_COCO_finetune/best_AP_epoch_1.pth"
 POSE_PTH="models/pretrained/vitpose-l-simple.pth"
 
-OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_ViTPose"
+OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_ViTPose_TOP"
 
 python top_down_img_demo_with_mmdet.py \
     $DET_CFG \
@@ -30,6 +32,14 @@ python top_down_img_demo_with_mmdet.py \
     $POSE_CFG \
     $POSE_PTH \
     --img-root $IN_DATA \
-    --out-img-root $OUT_DATA \
+    --out-img-root $OUT_DATA
+
+# python top_down_img_demo.py \
+#     $POSE_CFG \
+#     $POSE_PTH \
+#     --img-root $IN_DATA \
+#     --json-file $IN_DATA/MMA_annotations_coco.json \
+#     --out-img-root $OUT_DATA \
+    # --json-file $IN_DATA/coco_annotations.json \
 
 

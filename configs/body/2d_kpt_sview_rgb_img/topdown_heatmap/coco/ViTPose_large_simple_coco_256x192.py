@@ -1,11 +1,14 @@
 COCO_ROOT = "/datagrid/personal/purkrmir/data/COCO/original"
+# COCO_ROOT = "/datagrid/personal/purkrmir/data/COCO/humans_only/all/"
 BATCH_SIZE = 8
+
+# load_from = "models/pretrained/mae_pretrain_vit_large.pth"
 
 _base_ = [
     '../../../../_base_/default_runtime.py',
     '../../../../_base_/datasets/coco.py'
 ]
-evaluation = dict(interval=10, metric='mAP', save_best='AP')
+evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
 optimizer = dict(type='AdamW', lr=5e-4, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
@@ -31,6 +34,12 @@ lr_config = dict(
     warmup_ratio=0.001,
     step=[170, 200])
 total_epochs = 210
+log_config = dict(
+    interval=1,
+    hooks=[
+        dict(type='TextLoggerHook'),
+        dict(type='TensorboardLoggerHook')
+    ])
 target_type = 'GaussianHeatmap'
 channel_cfg = dict(
     num_output_channels=17,

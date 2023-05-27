@@ -479,7 +479,7 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
 
         # do evaluation only if the ground truth keypoint annotations exist
         if 'annotations' in self.coco.dataset:
-            info_str, wrong_ids, indices = self._do_python_keypoint_eval(res_file, return_wrong_images=True)
+            info_str, wrong_ids, indices, sample_score = self._do_python_keypoint_eval(res_file, return_wrong_images=True)
             name_value = OrderedDict(info_str)
 
             wrong_paths = np.array(list(map(
@@ -497,7 +497,7 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             name_value = {}
 
         if return_score:
-            return name_value, wrong_paths, indices
+            return name_value, wrong_paths, indices, sample_score
         else:
             return name_value
 
@@ -562,7 +562,7 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
         coco_eval.summarize()
 
         if return_wrong_images:
-            wrong_image_ids, indices = self._sort_images_by_prediction_score(coco_eval)
+            wrong_image_ids, img_score, sample_score = self._sort_images_by_prediction_score(coco_eval)
 
         stats_names = [
             'AP', 'AP .5', 'AP .75', 'AP (M)', 'AP (L)', 'AR', 'AR .5',
@@ -572,7 +572,7 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
         info_str = list(zip(stats_names, coco_eval.stats))
 
         if return_wrong_images:
-            return info_str, wrong_image_ids, indices
+            return info_str, wrong_image_ids, img_score, sample_score
         else:
             return info_str
 
@@ -580,8 +580,8 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
         if not hasattr(coco_eval, "ious"):
             coco_eval.evaluate()
 
-        i = 0
-        score = np.zeros(len(coco_eval.params.imgIds), dtype=np.float)
+        sample_score = np.array([])
+        img_score = np.ones(len(coco_eval.params.imgIds), dtype=np.float) * np.nan
 
         # Take only eval images with area == all --> first part of the evalImgs
         n_areas = len(coco_eval.params.areaRng)
@@ -590,103 +590,153 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
 
         # Compute score for each image. Score is MIN / MEAN of IoUs (= OKSs) 
         # over all poses in the image
+        num_nans = 0
+        num_samples = 0
         for score_i, key in enumerate(coco_eval.ious.keys()):
             img_ious = np.array(coco_eval.ious[key])
-
             img_eval = eval_imgs[score_i]
+            
+            if len(img_ious) == 0:
+                continue
+
+            # print("-"*20)
+            # print(img_ious, img_ious.shape)
+            # print(img_eval)
+            gt_ignore = img_eval["gtIgnore"].astype(bool).flatten()
+            # print(gt_ignore, gt_ignore.shape)
+            img_ious = img_ious[:, ~gt_ignore]
+
+            # Add np.nan for all GTs that are ignored
+            sample_score = np.append(sample_score, np.ones(np.sum(gt_ignore)) * np.nan)
+
+            if len(img_ious) == 0:
+                # sample_score = np.append(sample_score, np.ones(np.sum(gt_ignore)) * np.nan)
+                print("All GTs ignored", img_eval["image_id"])
+                continue
+
+            best_ious = np.max(img_ious, axis=0)
+            num_samples += len(best_ious)
+            idx_0 = np.argmax(img_ious, axis=0)
+            idx_0_unique = np.unique(idx_0)
+
+            # if len(best_ious) > 1:
+            #     print("#"*30)
+            #     print(img_eval)
+            #     print(img_ious)
+            #     print(best_ious)
+            #     print(idx_0)
+            #     print(idx_0_unique)
+
+            img_score[score_i] = np.mean(best_ious)
+            sample_score = np.append(sample_score, best_ious)
+
+            # assert len(idx_0) == len(idx_0_unique)
 
             # None == no annotations for this image
-            if img_eval is None:
-                score[score_i] = 10
-                continue
+            # if img_eval is None:
+            #     score[score_i] = np.nan
+            #     num_nans += 1
+            #     continue
             
-            dt_ids = np.array(img_eval['dtIds'])
-            gt_ids = np.array(img_eval['gtIds'])
-            gt_matches = np.array(img_eval['gtMatches'])
-            dt_matches = np.array(img_eval['dtMatches'])
+            # dt_ids = np.array(img_eval['dtIds'])
+            # gt_ids = np.array(img_eval['gtIds'])
+            # gt_matches = np.array(img_eval['gtMatches'])
+            # dt_matches = np.array(img_eval['dtMatches'])
 
-            num_preds = len(dt_ids)
-            num_gt = len(gt_ids)
+            # # print("-----")
+            # # print(gt_ids, dt_ids)
+            # # print(gt_matches, dt_matches)
+
+            # num_preds = len(dt_ids)
+            # num_gt = len(gt_ids)
             
-            # No GT --> 'empty' image, high score
-            # (as we are interested in the worst images and these are technically right)
-            if num_preds == 0 and num_gt == 0:
-                score[score_i] = 10
-                continue
+            # # No GT --> 'empty' image, high score
+            # # (as we are interested in the worst images and these are technically right)
+            # if num_preds == 0 and num_gt == 0:
+            #     score[score_i] = np.nan
+            #     continue
             
-            # Either GT or PRED amount is 0 --> score 0 as there are only FP or FN
-            elif num_gt == 0 or num_preds == 0:
-                score[score_i] = 0
-                continue
+            # # Either GT or PRED amount is 0 --> score 0 as there are only FP or FN
+            # elif num_gt == 0 or num_preds == 0:
+            #     score[score_i] = 0
+            #     continue
             
-            # Filter by ignore masks
-            gt_ignore_mask = ~ img_eval["gtIgnore"].astype(bool)
-            gt_ids = gt_ids[gt_ignore_mask]
-            gt_matches = gt_matches[0, gt_ignore_mask]
-            dt_ignore_mask = ~ img_eval["dtIgnore"][0].astype(bool)
-            dt_ids = dt_ids[dt_ignore_mask]
-            dt_matches = dt_matches[0, dt_ignore_mask]
+            # # Filter by ignore masks
+            # gt_ignore_mask = ~ img_eval["gtIgnore"].astype(bool)
+            # gt_ids = gt_ids[gt_ignore_mask]
+            # gt_matches = gt_matches[0, gt_ignore_mask]
+            # dt_ignore_mask = ~ img_eval["dtIgnore"][0].astype(bool)
+            # dt_ids = dt_ids[dt_ignore_mask]
+            # dt_matches = dt_matches[0, dt_ignore_mask]
             
-            img_ious = img_ious[dt_ignore_mask, :]
-            img_ious = img_ious[:, gt_ignore_mask]
+            # # print("-----")
+            # # print(gt_ids, dt_ids)
+            # # print(gt_matches, dt_matches)
 
-            # Filter matches that are '-1'
-            gt_nonmatch_mask = gt_matches >= 0
-            dt_nonmatch_mask = dt_matches >= 0
-            gt_ids = gt_ids[gt_nonmatch_mask]
-            dt_ids = dt_ids[dt_nonmatch_mask]
-            gt_matches = gt_matches[gt_nonmatch_mask]
-            dt_matches = dt_matches[dt_nonmatch_mask]
+            # img_ious = img_ious[dt_ignore_mask, :]
+            # img_ious = img_ious[:, gt_ignore_mask]
+
+            # # Filter matches that are '-1'
+            # gt_nonmatch_mask = gt_matches >= 0
+            # dt_nonmatch_mask = dt_matches >= 0
+            # gt_ids = gt_ids[gt_nonmatch_mask]
+            # dt_ids = dt_ids[dt_nonmatch_mask]
+            # gt_matches = gt_matches[gt_nonmatch_mask]
+            # dt_matches = dt_matches[dt_nonmatch_mask]
             
-            img_ious = img_ious[dt_nonmatch_mask, :]
-            img_ious = img_ious[:, gt_nonmatch_mask]
+            # img_ious = img_ious[dt_nonmatch_mask, :]
+            # img_ious = img_ious[:, gt_nonmatch_mask]
 
-            num_FPFN = np.max([np.sum(dt_nonmatch_mask), np.sum(gt_nonmatch_mask)]).squeeze()
+            # num_FPFN = np.max([np.sum(~dt_nonmatch_mask), np.sum(~gt_nonmatch_mask)]).squeeze()
+            
+            # num_preds = len(dt_ids)
+            # num_gt = len(gt_ids)
 
-            num_preds = len(dt_ids)
-            num_gt = len(gt_ids)
+            # # No GT --> 'empty' image, high score
+            # # (as we are interested in the worst images and these are technically right)
+            # if num_gt == 0 and num_preds == 0 and num_FPFN > 0:
+            #     # Somehow, GT and DT were not matched - OKS was so low
+            #     tentative_score = -1
 
-            # No GT --> 'empty' image, high score
-            # (as we are interested in the worst images and these are technically right)
-            if num_gt == 0 and num_preds == 0:
-                tentative_score = []
+            # # Exactly one GT and one PRED for the image
+            # # Take their IoU (= OKS) as score
+            # elif num_gt == 1 and num_preds == 1:
+            #     tentative_score = [img_ious.squeeze()]
 
-            # Exactly one GT and one PRED for the image
-            # Take their IoU (= OKS) as score
-            elif num_gt == 1 and num_preds == 1:
-                tentative_score = [img_ious.squeeze()]
+            # # There is the same number of GT and PRED. Parse them and compute 
+            # # MIN / MEAN of their IoU (= OKS)
+            # elif num_gt == num_preds:
+            #     row_idx1 = np.argsort(dt_matches)
+            #     col_idx1 = list(range(num_gt))
+            #     tentative_score = img_ious[row_idx1, col_idx1].squeeze()
+            #     # row_idx2 = list(range(num_preds))
+            #     # col_idx2 = np.argsort(gt_matches)
+            #     # score2 = np.mean(img_ious[row_idx2, col_idx2]).squeeze()
+            #     # print("="*20)
+            #     # print("Same number, need parsing")
+            #     # print(num_gt, num_preds)
+            #     # print(gt_ids, dt_ids)
+            #     # print(gt_matches)
+            #     # print(dt_matches)
 
-            # There is the same number of GT and PRED. Parse them and compute 
-            # MIN / MEAN of their IoU (= OKS)
-            elif num_gt == num_preds:
-                row_idx1 = np.argsort(dt_matches)
-                col_idx1 = list(range(num_gt))
-                tentative_score = img_ious[row_idx1, col_idx1].squeeze()
-                # row_idx2 = list(range(num_preds))
-                # col_idx2 = np.argsort(gt_matches)
-                # score2 = np.mean(img_ious[row_idx2, col_idx2]).squeeze()
-                # print("="*20)
-                # print("Same number, need parsing")
-                # print(num_gt, num_preds)
-                # print(gt_ids, dt_ids)
-                # print(gt_matches)
-                # print(dt_matches)
+            #     # # print(row_idx, col_idx)
+            #     # print("+"*10)
+            #     # print(img_ious)
+            #     # print("+"*10)
+            #     # print(img_ious[row_idx1, col_idx1], score1)
+            #     # print(img_ious[row_idx2, col_idx2], score2)
 
-                # # print(row_idx, col_idx)
-                # print("+"*10)
-                # print(img_ious)
-                # print("+"*10)
-                # print(img_ious[row_idx1, col_idx1], score1)
-                # print(img_ious[row_idx2, col_idx2], score2)
+            # # At least some of the persons were mis-predicted.
+            # # Compute MEAN / MIN over all poses where mis-predicted pose is 0
+            # else: 
+            #     raise ValueError("Different numbers")
 
-            # At least some of the persons were mis-predicted.
-            # Compute MEAN / MIN over all poses where mis-predicted pose is 0
-            else: 
-                raise ValueError("Different numbers")
-
-            # tentative_score = np.concatenate([tentative_score, np.zeros(1, num_FPFN)])
-            # print(tentative_score)
-            score[score_i] = np.mean(tentative_score).squeeze()
+            # # tentative_score = np.concatenate([tentative_score, np.zeros(1, num_FPFN)])
+            # tentative_score = np.array(tentative_score).flatten()
+            # if len(tentative_score) == 0:
+            #     score[score_i] = 0
+            # else:
+            #     score[score_i] = np.mean(tentative_score).squeeze()
                             
 
         # score = np.zeros(len(coco_eval.params.imgIds), dtype=np.float)
@@ -726,13 +776,13 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
                 # Images not 'mentioned' in the annotation
                 # score[ii] = 10
 
-        ind = np.argsort(score)
-        score = score[ind]
+        ind = np.argsort(img_score)
+        img_score = img_score[ind]
         sorted_images = np.array(coco_eval.params.imgIds)[ind]
 
         # print(score[:50])
 
-        return sorted_images, score
+        return sorted_images, img_score, sample_score
 
     def _sort_and_unique_bboxes(self, kpts, key='bbox_id'):
         """sort kpts and remove the repeated ones."""

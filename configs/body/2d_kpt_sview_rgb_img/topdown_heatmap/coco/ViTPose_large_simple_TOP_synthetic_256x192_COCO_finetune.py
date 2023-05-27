@@ -1,11 +1,6 @@
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/test_dataset"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/COCO/humans_only/all/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/pose_experiments/synthetic/distance_1.5_simplicity_1.5_view_PERIMETER_rotation_000_naked"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/pose_experiments/MMA"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/pose_experiments/view_dependency_dist_03"
-COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/pose_regressor_50k/"
+NEW_COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_synthetic"
+ORIGINAL_COCO_ROOT = "/datagrid/personal/purkrmir/data/COCO/humans_only/all/"
 BATCH_SIZE = 8
-ANNOTATION_NAME = "person_keypoints_val2017.json"
 
 # load_from = "models/pretrained/mae_pretrain_vit_large.pth"
 load_from = "models/pretrained/vitpose-l-simple.pth"
@@ -16,7 +11,7 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=3e-4, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=6.25e-5, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=24, 
@@ -32,26 +27,16 @@ optimizer = dict(type='AdamW', lr=3e-4, betas=(0.9, 0.999), weight_decay=0.1,
 
 optimizer_config = dict(grad_clip=dict(max_norm=1., norm_type=2))
 
-# lr_config = dict(
-#     policy='exp',
-#     gamma=1.1,
-#     # min_lr=1e-1,
-#     by_epoch=False
-# )
-
 # learning policy
 lr_config = dict(
-    policy='fixed',
+    policy='step',
     warmup='linear',
-    # by_epoch=False,
-    warmup_iters=500,
+    warmup_iters=100,
     warmup_ratio=0.001,
-    # step=[170, 300, 480],
-    # step=[20, 40],
-)
+    step=[7])
 
-# total_epochs = 1
-total_epochs = 50
+total_epochs = 10
+
 log_config = dict(
     interval=1,
     hooks=[
@@ -95,8 +80,6 @@ model = dict(
         upsample=4,
         extra=dict(final_conv_kernel=3, ),
         out_channels=channel_cfg['num_output_channels'],
-        # loss_keypoint=dict(type='JointsOHKMMSELoss', use_target_weight=True)),
-        # loss_keypoint=dict(type='MSELoss')),
         loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)),
     train_cfg=dict(),
     test_cfg=dict(
@@ -120,7 +103,7 @@ data_cfg = dict(
     vis_thr=0.2,
     use_gt_bbox=True,
     det_bbox_thr=0.0,
-    bbox_file=COCO_ROOT + '/annotations/'+ANNOTATION_NAME,
+    bbox_file=NEW_COCO_ROOT + '/annotations/person_keypoints_train2017.json',
 )
 
 train_pipeline = [
@@ -174,7 +157,6 @@ val_pipeline = [
 
 test_pipeline = val_pipeline
 
-data_root = COCO_ROOT
 data = dict(
     samples_per_gpu=BATCH_SIZE,
     workers_per_gpu=4,
@@ -182,22 +164,22 @@ data = dict(
     test_dataloader=dict(samples_per_gpu=BATCH_SIZE),
     train=dict(
         type='TopDownCocoDataset',
-        ann_file=f'{data_root}/annotations/'+ANNOTATION_NAME,
-        img_prefix=f'{data_root}/train2017/',
+        ann_file=f'{NEW_COCO_ROOT}/annotations/person_keypoints_train2017.json',
+        img_prefix=f'{NEW_COCO_ROOT}/train2017/',
         data_cfg=data_cfg,
         pipeline=train_pipeline,
         dataset_info={{_base_.dataset_info}}),
     val=dict(
         type='TopDownCocoDataset',
-        ann_file=f'{data_root}/annotations/'+ANNOTATION_NAME,
-        img_prefix=f'{data_root}/train2017/',
+        ann_file=f'{ORIGINAL_COCO_ROOT}/annotations/person_keypoints_val2017.json',
+        img_prefix=f'{ORIGINAL_COCO_ROOT}/val2017/',
         data_cfg=data_cfg,
         pipeline=val_pipeline,
         dataset_info={{_base_.dataset_info}}),
     test=dict(
         type='TopDownCocoDataset',
-        ann_file=f'{data_root}/annotations/'+ANNOTATION_NAME,
-        img_prefix=f'{data_root}/val2017/',
+        ann_file=f'{NEW_COCO_ROOT}/annotations/person_keypoints_val2017.json',
+        img_prefix=f'{NEW_COCO_ROOT}/val2017/',
         data_cfg=data_cfg,
         pipeline=test_pipeline,
         dataset_info={{_base_.dataset_info}}),

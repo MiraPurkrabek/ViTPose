@@ -3,6 +3,7 @@ import cv2
 
 import cv2
 import numpy as np
+import warnings
 
 from mmpose.core.post_processing import (affine_transform, fliplr_joints,
                                          get_affine_transform, get_warp_matrix,

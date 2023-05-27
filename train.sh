@@ -1,10 +1,7 @@
-CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_large_simple_coco_256x192.py"
-WEIGHTS="models/pretrained/vitpose-l-simple.pth"
+CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_base_simple_COMBO_finetune_256x192.py"
 
 tools/dist_train.sh \
     $CFG \
-    1 \
-    --cfg-options model.pretrained=$WEIGHTS \
-    --seed 0
+    4 \
 
     

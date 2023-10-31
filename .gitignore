@@ -163,3 +163,5 @@ imgs/
 
 work_dirs/
 models/
+archive/
+.dist_test/

@@ -1,3 +1,7 @@
+# COCO_ROOT = "/datagrid/personal/purkrmir/data/COCO/original"
+COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1"
+BATCH_SIZE = 8
+
 _base_ = [
     '../../../../_base_/default_runtime.py',
     '../../../../_base_/datasets/coco.py'
@@ -87,12 +91,12 @@ data_cfg = dict(
     vis_thr=0.2,
     use_gt_bbox=False,
     det_bbox_thr=0.0,
-    bbox_file='data/coco/person_detection_results/'
-    'COCO_val2017_detections_AP_H_56_person.json',
+    bbox_file=COCO_ROOT + '/annotations/person_keypoints_val2017.json',
 )
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
+    dict(type='TopDownGetBboxCenterScale', padding=1.0),
     dict(type='TopDownRandomFlip', flip_prob=0.5),
     dict(
         type='TopDownHalfBodyTransform',
@@ -122,6 +126,7 @@ train_pipeline = [
 
 val_pipeline = [
     dict(type='LoadImageFromFile'),
+    dict(type='TopDownGetBboxCenterScale', padding=1.0),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(
@@ -139,12 +144,12 @@ val_pipeline = [
 
 test_pipeline = val_pipeline
 
-data_root = 'data/coco'
+data_root = COCO_ROOT
 data = dict(
-    samples_per_gpu=64,
+    samples_per_gpu=BATCH_SIZE,
     workers_per_gpu=4,
-    val_dataloader=dict(samples_per_gpu=32),
-    test_dataloader=dict(samples_per_gpu=32),
+    val_dataloader=dict(samples_per_gpu=BATCH_SIZE),
+    test_dataloader=dict(samples_per_gpu=BATCH_SIZE),
     train=dict(
         type='TopDownCocoDataset',
         ann_file=f'{data_root}/annotations/person_keypoints_train2017.json',

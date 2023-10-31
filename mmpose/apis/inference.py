@@ -553,7 +553,8 @@ def vis_pose_result(model,
                     dataset='TopDownCocoDataset',
                     dataset_info=None,
                     show=False,
-                    out_file=None):
+                    out_file=None,
+                    is_gt=None):
     """Visualize the detection results on the image.
 
     Args:
@@ -569,6 +570,31 @@ def vis_pose_result(model,
         out_file (str|None): The filename of the output visualization image.
     """
 
+    default_palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102],
+        [230, 230, 0], [255, 153, 255], [153, 204, 255],
+        [255, 102, 255], [255, 51, 255], [102, 178, 255],
+        [51, 153, 255], [255, 153, 153], [255, 102, 102],
+        [255, 51, 51], [153, 255, 153], [102, 255, 102],
+        [51, 255, 51], [0, 255, 0], [0, 0, 255],
+        [255, 0, 0], [255, 255, 255]])
+    
+    left_leg_color = [0, 255, 255]
+    left_arm_color = [150, 255, 0]
+    left_face_color = [223, 153, 0]
+
+    right_leg_color = [0, 0, 255]
+    right_arm_color = [0, 150, 255]
+    right_face_color = [0, 255, 255]
+    
+    torso_color = [255, 150, 0]
+    head_color = [255, 150, 0]
+    nongt_palette = np.array([
+        left_leg_color, left_leg_color, right_leg_color, right_leg_color, torso_color, torso_color,
+        torso_color, torso_color, left_arm_color, right_arm_color, left_arm_color, right_arm_color,
+        head_color, head_color, head_color, left_face_color, right_face_color, left_face_color,
+        right_face_color
+    ], dtype=int)
+
     # get dataset info
     if (dataset_info is None and hasattr(model, 'cfg')
             and 'dataset_info' in model.cfg):
@@ -578,6 +604,13 @@ def vis_pose_result(model,
         skeleton = dataset_info.skeleton
         pose_kpt_color = dataset_info.pose_kpt_color
         pose_link_color = dataset_info.pose_link_color
+        
+        if is_gt == True:
+            pose_kpt_color = dataset_info.pose_kpt_color
+            pose_link_color = nongt_palette
+        elif is_gt == False:
+            pose_kpt_color = dataset_info.pose_kpt_color
+            pose_link_color = np.clip(nongt_palette * np.array([0.5, 0.5, 0.5]), 0, 255).astype(int)
     else:
         warnings.warn(
             'dataset is deprecated.'
@@ -585,13 +618,7 @@ def vis_pose_result(model,
             'Check https://github.com/open-mmlab/mmpose/pull/663 for details.',
             DeprecationWarning)
         # TODO: These will be removed in the later versions.
-        palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102],
-                            [230, 230, 0], [255, 153, 255], [153, 204, 255],
-                            [255, 102, 255], [255, 51, 255], [102, 178, 255],
-                            [51, 153, 255], [255, 153, 153], [255, 102, 102],
-                            [255, 51, 51], [153, 255, 153], [102, 255, 102],
-                            [51, 255, 51], [0, 255, 0], [0, 0, 255],
-                            [255, 0, 0], [255, 255, 255]])
+        palette = default_palette
 
         if dataset in ('TopDownCocoDataset', 'BottomUpCocoDataset',
                        'TopDownOCHumanDataset', 'AnimalMacaqueDataset'):

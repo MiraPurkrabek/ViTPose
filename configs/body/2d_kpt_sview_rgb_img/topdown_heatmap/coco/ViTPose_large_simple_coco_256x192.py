@@ -1,5 +1,6 @@
 COCO_ROOT = "/datagrid/personal/purkrmir/data/COCO/original"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/COCO/humans_only/all/"
+# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq2"
 BATCH_SIZE = 8
 
 # load_from = "models/pretrained/mae_pretrain_vit_large.pth"
@@ -159,7 +160,7 @@ data = dict(
     samples_per_gpu=BATCH_SIZE,
     workers_per_gpu=4,
     val_dataloader=dict(samples_per_gpu=BATCH_SIZE),
-    test_dataloader=dict(samples_per_gpu=BATCH_SIZE),
+    test_dataloader=dict(samples_per_gpu=BATCH_SIZE, shuffle=False),
     train=dict(
         type='TopDownCocoDataset',
         ann_file=f'{data_root}/annotations/person_keypoints_train2017.json',

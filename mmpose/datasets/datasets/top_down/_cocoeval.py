@@ -250,6 +250,16 @@ class COCOeval:
         # loop through images, area range, max detection number
         catIds = p.catIds if p.useCats else [-1]
 
+        # print("DTs:")
+        # for dt in self._dts[0, 1]:
+        #     print(dt["id"], end=", ")
+        # print()
+
+        # print("GTs:")
+        # for gt in self._gts[0, 1]:
+        #     print(gt["id"], end=", ")
+        # print()
+        
         if p.iouType == 'segm' or p.iouType == 'bbox':
             computeIoU = self.computeIoU
         elif 'keypoints' in p.iouType:
@@ -258,29 +268,33 @@ class COCOeval:
                         for imgId in p.imgIds
                         for catId in catIds}
 
-        tmp_ious = {(imgId, catId): self.computeOksPerKpt(imgId, catId) \
-                        for imgId in p.imgIds
-                        for catId in catIds}
+        # tmp_ious = {(imgId, catId): self.computeOksPerKpt(imgId, catId) \
+        #                 for imgId in p.imgIds
+        #                 for catId in catIds}
 
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
-        self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet)
+        self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet,
+                                    #   return_matching=True, match_by_bbox=True
+                                      )
                  for catId in catIds
                  for areaRng in p.areaRng
                  for imgId in p.imgIds
              ]
-
-        tmp_ious = {key: value for key, value in tmp_ious.items() if len(value) > 0}
-        evalImgs = [e for e in self.evalImgs if e is not None]
-        # print()
-        # print()
-        # print("tmp_ious")
-        # for e, k in zip(evalImgs, tmp_ious.keys()):
-        #     v = tmp_ious[k]
-        #     print("{}: {}\t\t{}, {}".format(k, v.shape, e["dtIds"], e["gtIds"]))
-        # print()
-        # # print(self.evalImgs)
-        # print()
+        
+        self.matched_pairs = []
+        for imgId in p.imgIds:
+            img_eval = self.evaluateImg(
+                imgId,
+                1,
+                [0, 1e5**2],
+                maxDet,
+                return_matching=True,
+                match_by_bbox=False,
+            )
+            if img_eval is None or "assigned_pairs" not in img_eval:
+                continue
+            self.matched_pairs.extend(img_eval['assigned_pairs'])
 
         self._paramsEval = copy.deepcopy(self.params)
         toc = time.time()
@@ -405,6 +419,8 @@ class COCOeval:
                     z = np.zeros((k))
                     dx = np.max((z, x0-xd),axis=0)+np.max((z, xd-x1),axis=0)
                     dy = np.max((z, y0-yd),axis=0)+np.max((z, yd-y1),axis=0)
+                    # dx = np.ones(dx.shape) * 100
+                    # dy = np.ones(dy.shape) * 100
 
                 # print("dx, dy", dx, dy)
                 keypoints = [
@@ -556,12 +572,17 @@ class COCOeval:
                 # ious[i, j] = np.sum(np.exp(-e)) / e.shape[0]
         return ious
 
-    def evaluateImg(self, imgId, catId, aRng, maxDet):
+    def evaluateImg(self, imgId, catId, aRng, maxDet, return_matching=False, match_by_bbox=False):
         '''
         perform evaluation for single category and image
         :return: dict (single image results)
         '''
+        # print("evaluateImg({}, {}, {}, {})".format(imgId, catId, aRng, maxDet))
         p = self.params
+        if return_matching:
+            iouThrs = np.array([0.1])
+        else:
+            iouThrs = p.iouThrs
         if p.useCats:
             gt = self._gts[imgId,catId]
             dt = self._dts[imgId,catId]
@@ -570,7 +591,7 @@ class COCOeval:
             dt = [_ for cId in p.catIds for _ in self._dts[imgId,cId]]
         if len(gt) == 0 and len(dt) ==0:
             return None
-
+        
         for g in gt:
             if 'area' not in g or not self.use_area:
                 tmp_area = g['bbox'][2] * g['bbox'][3] * 0.53
@@ -580,7 +601,7 @@ class COCOeval:
                 g['_ignore'] = 1
             else:
                 g['_ignore'] = 0
-
+        
         # sort dt highest score first, sort gt ignore last
         gtind = np.argsort([g['_ignore'] for g in gt], kind='mergesort')
         gt = [gt[i] for i in gtind]
@@ -590,24 +611,34 @@ class COCOeval:
         # load computed ious
         ious = self.ious[imgId, catId][:, gtind] if len(self.ious[imgId, catId]) > 0 else self.ious[imgId, catId]
 
-        # if len(gt) > 0:
-        #     print("+++++++++")
-        #     print("evaluateImg({}, {}, {}, {})".format(imgId, catId, aRng, maxDet))
-        #     print("gtind", gtind)
-        #     print("dtind", dtind)
-        #     print("iscrowd", iscrowd)
-        #     print("ious", ious)
-        #     print("iouThrs", p.iouThrs)
-
-        T = len(p.iouThrs)
+        T = len(iouThrs)
         G = len(gt)
         D = len(dt)
         gtm = np.ones((T, G), dtype=np.int64) * -1
         dtm = np.ones((T, D), dtype=np.int64) * -1
         gtIg = np.array([g['_ignore'] for g in gt])
         dtIg = np.zeros((T,D))
-        if len(ious):
-            for tind, t in enumerate(p.iouThrs):
+
+        # Additional variables for per-keypoint OKS
+        assigned_pairs = []
+
+        if return_matching and match_by_bbox:
+            for tind, t in enumerate(iouThrs):
+                for dind, d in enumerate(dt):
+                    d_center = np.array(d["center"])
+                    for gind, g in enumerate(gt):
+                        g_bbox = np.array(g["bbox"])
+                        g_center = g_bbox[:2] + g_bbox[2:] / 2
+                        if np.allclose(d_center, g_center):
+                            iou = ious[dind, gind] if not g["ignore"] else np.nan
+                            assigned_pairs.append((d, g, iou))
+                            dtIg[tind, dind] = gtIg[gind]
+                            dtm[tind, dind]  = gt[gind]['id']
+                            gtm[tind, gind]  = d['id']
+                            break        
+        elif len(ious):            
+            for tind, t in enumerate(iouThrs):
+                
                 for dind, d in enumerate(dt):
                     # information about best match so far (m=-1 -> unmatched)
                     iou = min([t,1-1e-10])
@@ -626,28 +657,34 @@ class COCOeval:
                         # if match successful and best so far, store appropriately
                         iou = ious[dind,gind]
                         m = gind
-                    # if match made store id of match for both dt and gt
+                    
+                    if return_matching and not match_by_bbox:
+                        assigned_pairs.append((d, gt[m], iou if (m != -1 and gtIg[m] != 1) else np.nan))
+                    
                     if m == -1:
                         continue
+                    # if match made store id of match for both dt and gt
                     dtIg[tind, dind] = gtIg[m]
                     dtm[tind, dind]  = gt[m]['id']
                     gtm[tind, m]     = d['id']
         # set unmatched detections outside of area range to ignore
         a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
-        dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))
+        dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
         # store results for given image and category
         return {
-                'image_id':     imgId,
-                'category_id':  catId,
-                'aRng':         aRng,
-                'maxDet':       maxDet,
-                'dtIds':        [d['id'] for d in dt],
-                'gtIds':        [g['id'] for g in gt],
-                'dtMatches':    dtm,
-                'gtMatches':    gtm,
-                'dtScores':     [d[self.score_key] for d in dt],
-                'gtIgnore':     gtIg,
-                'dtIgnore':     dtIg,
+                'image_id':             imgId,
+                'category_id':          catId,
+                'aRng':                 aRng,
+                'maxDet':               maxDet,
+                'dtIds':                [d['id'] for d in dt],
+                'gtIds':                [g['id'] for g in gt],
+                'dtMatches':            dtm,
+                'gtMatches':            gtm,
+                'assigned_pairs':       assigned_pairs,
+                'dtScores':             [d[self.score_key] for d in dt],
+                'gtIgnore':             gtIg,
+                'dtIgnore':             dtIg,
+                'gtIndices':            gtind,
             }
 
     def accumulate(self, p = None):

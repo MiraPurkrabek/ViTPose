@@ -111,6 +111,7 @@ def main():
         else:
             os.makedirs(args.out_img_root, exist_ok=True)
             out_file = os.path.join(args.out_img_root, f'vis_{i}.jpg')
+            out_blur_file = os.path.join(args.out_img_root, f'vis_{i}.jpg')
 
         vis_pose_result(
             pose_model,

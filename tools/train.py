@@ -77,10 +77,25 @@ def parse_args():
     return args
 
 
+def raplace_path_in_dict(d, old, new):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            raplace_path_in_dict(v, old, new)
+        elif isinstance(v, str):
+            d[k] = v.replace(old, new)
+    return d
+
 def main():
     args = parse_args()
 
     cfg = Config.fromfile(args.config)
+
+    if "PATH_TO_DATA" in os.environ:
+        cfg = raplace_path_in_dict(
+            cfg,
+            "/datagrid/personal/purkrmir/data",
+            os.environ["PATH_TO_DATA"]
+        )
 
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
@@ -137,7 +152,11 @@ def main():
         cfg.gpu_ids = range(world_size)
 
     # create work_dir
+    print("Work dir: ", osp.abspath(cfg.work_dir))
     mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
+    print("List Work dir: ", os.listdir(osp.abspath(osp.dirname(cfg.work_dir))))
+    print("List Work dir: ", os.listdir(osp.abspath(cfg.work_dir)))
+    print(cfg)
     # init the logger before other steps
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
     log_file = osp.join(cfg.work_dir, f'{timestamp}.log')

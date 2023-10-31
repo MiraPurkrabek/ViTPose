@@ -6,6 +6,7 @@ import os.path as osp
 import warnings
 import numpy as np
 import cv2
+from tqdm import tqdm
 
 import mmcv
 import torch
@@ -21,6 +22,8 @@ from mmpose.utils import setup_multi_processes
 
 import json
 import matplotlib.pyplot as plt
+
+from posevis import pose_visualization
 
 try:
     from mmcv.runner import wrap_fp16_model
@@ -71,6 +74,7 @@ def parse_args():
     parser.add_argument('config', help='test config file path')
     parser.add_argument('checkpoint', help='checkpoint file')
     parser.add_argument('--out', help='output result file')
+    parser.add_argument('--n-gpus', type=int, help='number of used GPUs')
     parser.add_argument(
         '--work-dir', help='the dir to save evaluation results')
     parser.add_argument(
@@ -211,6 +215,11 @@ def main():
         outputs = multi_gpu_test(model, data_loader, args.tmpdir,
                                  args.gpu_collect, return_heatmaps=True)
         
+
+    print("\nInference done")
+
+    # print(outputs[0]["preds"].shape)
+
     rank, _ = get_dist_info()
     eval_config = cfg.get('evaluation', {})
     eval_config = merge_configs(eval_config, dict(metric=args.eval))
@@ -226,19 +235,18 @@ def main():
             print(f'\nwriting results to {args.out}')
             mmcv.dump(outputs, args.out)
 
-        results, wrong_images, oks_score, oks_sample_score = dataset.evaluate(outputs, cfg.work_dir, return_score=True, **eval_config)
+        # print("="*30)
+        # results_per_kpt = dataset.evaluate_per_kpts(outputs, cfg.work_dir, return_score=True, **eval_config)
+        # kpts = dataset.coco.dataset["categories"][0]["keypoints"]
+        # for i, result in enumerate(results_per_kpt):
+        #     # print("=====", kpts[i], "="*30)
+        #     print("{:s} -> {:.1f}".format(kpts[i], 100 * float(result['AP'])))
+        # print("="*30)
         
-        print("oks_score", oks_score.shape, np.mean(oks_score))
-        print("oks_sample_score", oks_sample_score.shape, np.mean(oks_sample_score))
-        print(np.isnan(oks_score).sum(), (oks_score <= 0).sum())
-        print(np.isnan(oks_sample_score).sum(), (oks_sample_score <= 0).sum())
-
-        valid_oks = oks_score[np.isnan(oks_score) == False]
-        print("valid_oks", valid_oks.shape, valid_oks.mean())
-
-        print(oks_score)
-        print(oks_score.shape, len(dataset.coco.dataset["annotations"]))
-        print(np.isnan(oks_score).sum(), (oks_score <= 0).sum(), (oks_score > 0).sum())
+        results, sorted_matches = dataset.evaluate(outputs, cfg.work_dir, return_score=True, **eval_config)
+        print("Number of sorted matches:", len(sorted_matches))
+        oks_list = np.array([m[2] for m in sorted_matches])
+        print("Dataset evaluated")
 
         config_name = ".".join(os.path.basename(args.config).split(".")[:-1])
         save_dir = os.path.join(
@@ -260,111 +268,134 @@ def main():
 
         # If views dict loaded, add OKS score to it
         if views_dict is not None:
-            for i, img_path in enumerate(wrong_images):
-                img_name = os.path.basename(img_path)
-                views_dict[img_name]["oks_score"] = oks_score[i]
+            for img_name in views_dict.keys():
+                views_dict[img_name]["oks_score"] = float(img_score_dict[img_name])
             
             # Save views dict
             views_dict_path = os.path.join(cfg.data_root, "annotations", "views_w_oks.json")
+            print("Saving the views dict to {}".format(views_dict_path))
             json.dump(views_dict, open(views_dict_path, "w"), indent=2)
-        else:
-            # Save OKS for each image for further eval
-            coco_dict_with_oks = dataset.coco.dataset.copy()
-            i = 0
-            for img in coco_dict_with_oks["images"]:
-                image_id = img["id"]
-                for ann in coco_dict_with_oks["annotations"]:
-                    if ann["image_id"] == image_id:
-                        ann["oks"] = float(oks_sample_score[i])
-                        i += 1
+        # else:
+        #     # Save OKS for each image for further eval
+        #     coco_dict_with_oks = dataset.coco.dataset.copy()
             
-            # for i, ann in enumerate(coco_dict_with_oks["annotations"]):
-            #     ann["oks"] = float(oks_sample_score[i])
-            with open(os.path.join(cfg.data_root, "annotations", "coco_dict_with_oks.json"), "w") as f:
-                json.dump(coco_dict_with_oks, f, indent=2)
+        #     for i, ann in enumerate(coco_dict_with_oks["annotations"]):
+        #         ann["oks"] = float(oks_list[i])
+        #     coco_dict_with_oks_path = os.path.join(cfg.data_root, "annotations", "coco_dict_with_oks.json")
+        #     print("Saving the coco with OKS dict to {}".format(coco_dict_with_oks_path))
+        #     with open(coco_dict_with_oks_path, "w") as f:
+        #         json.dump(coco_dict_with_oks, f, indent=2)
 
         # Save score histogram
-        hist_oks_score = oks_score[oks_score <= 1]
-        hist_oks_score = hist_oks_score[hist_oks_score >= 0]
+        hist_oks_score = np.clip(oks_list, 0, 1)
         plt.hist(hist_oks_score, bins=100)
         plt.savefig(os.path.join(save_dir, "test_score_histogram.png"))
 
         if not hasattr(dataset, "coco"):
             ann_dict = json.load(open("/datagrid/personal/purkrmir/data/MPII/annotations/_mpii_trainval_custom.json", "r"))
-
-        num_images = 30
-        indices_to_draw = np.geomspace(1, dataset.num_images, num=num_images) - 1
-        indices_to_draw = np.unique(indices_to_draw.astype(int))
-
-        # indices_to_draw = np.unique(list(range(dataset.num_images)))
+       
         
-        for i in indices_to_draw:
-            image_path = wrong_images[i]
-            image_name = osp.basename(image_path)
+        num_non_nan = (np.isnan(oks_list) == False).sum()
+        print("There is {:d} non-NaN OKS scores out of {:d} samples".format(num_non_nan, len(oks_list)))
+
+        draw_all = False
+        if draw_all: 
+            num_images = len(oks_list)
+            indices_to_draw = list(range(num_images))
+        else:
+            num_images = 100
+            print(1, len(oks_list), num_images)
+            indices_to_draw = np.geomspace(1, len(oks_list), num=num_images) - 1
+            indices_to_draw = np.unique(indices_to_draw.astype(int))
+
+        # copy_worst = False
+        # if copy_worst:
+        #     print("Selecting 20% of hard negatives...")
+        #     # Copy worst 20% of images
+        #     worst_save_dir = os.path.join(
+        #         cfg.data_root,
+        #         "hard_negatives",
+        #         config_name,
+        #     )
+        #     os.makedirs(worst_save_dir, exist_ok=True)
+        #     num_images = int(num_non_nan * 0.2)
+        #     worst_dataset = {
+        #         "images": [],
+        #         "annotations": [],
+        #         "categories": dataset.coco.dataset["categories"],
+        #     }
+        #     for idx in tqdm(sorted_oks_per_sample[:num_images], ascii=True):
+        #         annotation = dataset.coco.dataset["annotations"][idx]
+        #         img_ann = dataset.coco.loadImgs(annotation["image_id"])[0]
+        #         image_name = dataset.id2name[annotation["image_id"]]
+        #         image_path = os.path.join(cfg.data_root, "val2017", image_name)
+        #         shutil.copy(image_path, worst_save_dir)
+        #         worst_dataset["annotations"].append(annotation)
+        #         worst_dataset["images"].append(img_ann)
+        #     with open(os.path.join(worst_save_dir, os.pardir, "{}_hard_negatives.json".format(config_name)), "w") as f:
+        #         json.dump(worst_dataset, f, indent=2)            
+
+
+        print("Drawing {:d} images ({:d} available)".format(len(indices_to_draw), len(oks_list)))
+        for i in tqdm(indices_to_draw, ascii=True):
+            dt, annotation, score = sorted_matches[i]
+            oks_score_for_this_sample = score
+            
+            image_name = dataset.id2name[annotation["image_id"]]
+            image_path = os.path.join(cfg.data_root, "val2017", image_name)
+            
             pose_results = []
             gt_pose_results = []
             gt_pose_vis = []
             gt_pose_invis = []
             heatmaps = []
-            if hasattr(dataset, "coco"):
-                for ann in dataset.coco.dataset["annotations"]:
-                    if ann["image_id"] == dataset.name2id[image_name]:
-                        kpt = np.array(ann["keypoints"]).reshape(17, 3)
-                        visibility = kpt[:, -1]
-                        
-                        vis_kpt = kpt.copy()
-                        vis_kpt[visibility != 2, :] = 0
-                        
-                        invis_kpt = kpt.copy()
-                        invis_kpt[visibility != 1, :] = 0
+            
+            kpt = np.array(annotation["keypoints"]).reshape(17, 3)
+            visibility = kpt[:, -1]
+            
+            vis_kpt = kpt.copy()
+            vis_kpt[visibility != 2, :] = 0
+            
+            invis_kpt = kpt.copy()
+            invis_kpt[visibility != 1, :] = 0
 
-                        kpt[:, -1] = (kpt[:, -1] > 0).astype(int)
-                        invis_kpt[:, -1] = (invis_kpt[:, -1] > 0).astype(int)
-                        vis_kpt[:, -1] = (vis_kpt[:, -1] > 0).astype(int)
-                        
-                        bbox_wh = np.array(ann["bbox"]).reshape(1, 4)
-                        gt_pose_results.append({
-                            "keypoints": kpt,
-                            "bbox": bbox_xywh2xyxy(bbox_wh),
-                        })
-                        gt_pose_vis.append({
-                            "keypoints": vis_kpt,
-                            "bbox": bbox_xywh2xyxy(bbox_wh),
-                        })
-                        gt_pose_invis.append({
-                            "keypoints": invis_kpt,
-                            "bbox": bbox_xywh2xyxy(bbox_wh),
-                        })
-            else:
-                for gt in ann_dict[image_name]:
-                    kpt = np.array(gt["joints"]).reshape(16, 2)
-                    visibility = np.array(gt["joints_vis"]).reshape(16, 1)
-                    kpt = np.concatenate([kpt, visibility], axis=1)
-                    bbox_c = np.array(gt["center"])
-                    bbox_s = np.array([gt["scale"], gt["scale"]])
-                    bbox_wh = bbox_cs2xywh(bbox_c, bbox_s).reshape(1, 4)
-                    gt_pose_results.append({
-                        "keypoints": kpt,
-                        "bbox": bbox_xywh2xyxy(bbox_wh)
-                    })
+            kpt[:, -1] = (kpt[:, -1] > 0).astype(int)
+            invis_kpt[:, -1] = (invis_kpt[:, -1] > 0).astype(int)
+            vis_kpt[:, -1] = (vis_kpt[:, -1] > 0).astype(int)
+            
+            bbox_wh = np.array(annotation["bbox"]).reshape(1, 4)
+            gt_pose_results.append({
+                "keypoints": kpt,
+                "bbox": bbox_xywh2xyxy(bbox_wh),
+            })
+            gt_pose_vis.append({
+                "keypoints": vis_kpt,
+                "bbox": bbox_xywh2xyxy(bbox_wh),
+            })
+            gt_pose_invis.append({
+                "keypoints": invis_kpt,
+                "bbox": bbox_xywh2xyxy(bbox_wh),
+            })
 
-            for batch in outputs:
-                batch_images = np.array(batch["image_paths"])
-                indices = np.where(image_path == batch_images)[0]
+            
+            gt_img_id = annotation["image_id"]
+            gt_id = annotation["id"]
+            dt_img_id = dt["image_id"]
+            bbox_cs = np.array(list(dt["center"]) + list(dt["scale"])).reshape((1, 4))
+            bbox_wh = bbox_cs2xywh(bbox_cs[:, :2], bbox_cs[:, 2:], padding=1.0).reshape((1, 4))
+            bbox_xy = bbox_xywh2xyxy(bbox_wh).squeeze()
+            bbox_wh[bbox_wh < 0] = 0
+            bbox_xy[bbox_xy < 0] = 0
+            
+            pose_results.append({
+                "keypoints": dt["keypoints"],
+                "bbox": bbox_xy,
+            })
 
-                if indices.size > 0:
-                    for ind in indices:
-                        bbox_cs = batch["boxes"][ind, :4].reshape((1, 4))
-                        bbox_wh = bbox_cs2xywh(bbox_cs[:, :2], bbox_cs[:, 2:], padding=1.0).reshape((1, 4))
-                        bbox_xy = bbox_xywh2xyxy(bbox_wh).squeeze()
-                        
-                        pose_results.append({
-                            "keypoints": batch["preds"][ind, :, :],
-                            "bbox": bbox_xy,
-                        })
 
-                        heatmap = (batch["output_heatmap"][ind, :, :, :]).squeeze()
-                        heatmaps.append(heatmap)
+            # print(output_list[idx]["image_paths"].replace("/", ""), image_path.replace("/", ""))
+            assert gt_img_id == dt_img_id, "Image IDs does not equal, {:d} =!= {:d}".format(gt_img_id, dt_img_id)
+            # assert output_list[idx]["image_paths"].replace("/", "") == image_path.replace("/", ""), "{:s} =!= {:s}".format(output_list[idx]["image_paths"], image_path)
 
             # heatmaps = np.array(heatmaps)
             # for joint_i in range(heatmaps.shape[1]):
@@ -381,69 +412,89 @@ def main():
             #         pose_results[0]["keypoints"][joint_i, -1] * 255
             #     ))
 
-            save_path = osp.join(save_dir, "{:04d}_vis_{}".format(i, image_name))
+            image_basename = ".".join(image_name.split(".")[:-1])
+            image_ext = image_name.split(".")[-1]
+            # save_path = osp.join(save_dir, "{:04d}_vis_{:s}-{:02d}.{}".format(0, image_basename, gt_id, "png"))
+            save_path = osp.join(save_dir, "{:04d}_vis_{:s}-{:d}.{}".format(i, image_basename, gt_id, "png"))
+            save_path_paper = osp.join(save_dir, "{:04d}_vis_{:s}-{:d}_paper.{}".format(i, image_basename, gt_id, "png"))
             dataset_info = DatasetInfo(cfg.data['test'].get('dataset_info', None))
             
             # Plot GT as GREEN 
-            dataset_info.pose_link_color = [[0, 255, 0] for _ in range(len(dataset_info.pose_link_color))]
+            # dataset_info.pose_link_color = [[0, 255, 0] for _ in range(len(dataset_info.pose_link_color))]
             dataset_info.pose_kpt_color = [[0, 255, 0] for _ in range(len(dataset_info.pose_kpt_color))]
-            save_img = vis_pose_result(
-                model,
+            
+            # For the paper visualization, draw pose without bbox
+            # save_img_paper = pose_visualization(
+            #     image_path,
+            #     pose_results,
+            #     show_markers=False,
+            #     line_type="solid",
+            #     width_multiplier=2,
+            #     show_bbox=False,
+            # )
+
+            save_img = pose_visualization(
                 image_path,
                 gt_pose_results,
-                dataset=cfg.data['test']['type'],
-                dataset_info=dataset_info,
-                kpt_score_thr=0.3,
-                radius=4,
-                thickness=1,
-                bbox_color="green",
-                show=False,
-                out_file=None
+                show_markers=False,
+                line_type="dashed",
+                show_bbox=True,
             )
 
-            # Plot invisible GT as BLUE 
-            dataset_info.pose_kpt_color = [[255, 0, 0] for _ in range(len(dataset_info.pose_kpt_color))]
-            vis_pose_result(
-                model,
+            # print(image_basename, gt_id)
+            save_img = pose_visualization(
                 save_img,
-                gt_pose_invis,
-                dataset=cfg.data['test']['type'],
-                dataset_info=dataset_info,
-                kpt_score_thr=0.3,
-                radius=4,
-                thickness=1,
-                bbox_color="green",
-                show=False,
-                out_file=save_path
-            )
-
-            # Plot PRED as RED
-            dataset_info.pose_link_color = [[0, 0, 255] for _ in range(len(dataset_info.pose_link_color))]
-            dataset_info.pose_kpt_color = [[0, 0, 255] for _ in range(len(dataset_info.pose_kpt_color))]
-            save_img = vis_pose_result(
-                model,
-                save_path,
                 pose_results,
-                dataset=cfg.data['test']['type'],
-                dataset_info=dataset_info,
-                kpt_score_thr=cfg.data_cfg.vis_thr,
-                radius=4,
-                thickness=1,
-                bbox_color="red",
-                show=False,
-                out_file=None,
+                show_markers=True,
+                line_type="solid",
+                width_multiplier=1,
+                show_bbox=True,
+                conf_thr=0.3,
             )
+            
+            # Crop by the bbox
+            # save_img = save_img[
+            #     int(bbox_xy[1]):int(bbox_xy[3]),
+            #     int(bbox_xy[0]):int(bbox_xy[2]), :]
+            # save_img_paper = save_img_paper[
+            #     int(bbox_xy[1]):int(bbox_xy[3]),
+            #     int(bbox_xy[0]):int(bbox_xy[2]), :]
+            
             save_img = cv2.putText(
                 save_img,
-                "{:.2f}".format(oks_score[i]),
-                (10, 40),
+                "{:.2f}".format(oks_score_for_this_sample),
+                (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 fontScale=1,
                 color=(0, 255, 0),
                 thickness=2,
             )
-            mmcv.image.imwrite(save_img, save_path)
 
+            # if np.isnan(oks_score_for_this_sample):
+
+            # print()
+            # print("OKS score is NaN for image {:s}".format(image_name))
+            # print(annotation)
+            # print(pose_results)
+
+            # If score is lower than 0.5, overlay the image with semi-transparent red color
+            # alpha = 0.6
+            # conf = 0.8
+            # if oks_score_for_this_sample < conf:
+            #     save_img_paper = cv2.addWeighted(
+            #         save_img_paper,
+            #         alpha,
+            #         np.ones_like(save_img) * np.array([0, 0, 255], dtype=np.uint8),
+            #         1 - alpha,
+            #         0
+            #     )
+
+            try:
+                mmcv.image.imwrite(save_img, save_path)
+                # mmcv.image.imwrite(save_img_paper, save_path_paper)
+            except:
+                print("Failed to save image to {}".format(save_path))
+                continue
 
         for k, v in sorted(results.items()):
             print(f'{k}: {v}')

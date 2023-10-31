@@ -4,7 +4,10 @@
 CONFIG=$1
 GPUS=$2
 WEIGHTS=$3
-PORT=${PORT:-29501}
+PORT=${PORT:-29502}
+
+# Select a random port in range [29500, 29530]
+PORT=$(shuf -i 29500-63530 -n 1)
 
 PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
 

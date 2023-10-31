@@ -9,6 +9,8 @@ import torch
 import torch.distributed as dist
 from mmcv.runner import get_dist_info
 
+import numpy as np
+import itertools
 
 def single_gpu_test(model, data_loader, return_heatmaps=False):
     """Test model with a single gpu.
@@ -72,6 +74,30 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, return_he
     if rank == 0:
         prog_bar = mmcv.ProgressBar(len(dataset))
     for data in data_loader:
+    #     batch_size = data['img'].shape[0]
+    #     print()
+
+    #     # Save images to the file
+    #     imgs = data['img'].cpu().numpy()
+    #     for i in range(batch_size):
+    #         img = imgs[i, :, :, :]
+    #         img = np.transpose(img, (1, 2, 0))
+    #         img = img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
+    #         img = img * 255
+    #         img = img.astype(np.uint8)
+    #         mmcv.imwrite(img, "test_{}.png".format(i))
+            
+    #     for pair in itertools.combinations(range(batch_size), 2):
+    #         print(
+    #             pair, 
+    #             "IsClose={}".format(np.allclose(
+    #                 data['img'][pair[0], :, :, :].cpu().numpy(), 
+    #                 data['img'][pair[1], :, :, :].cpu().numpy()
+    #             )),
+    #             data['img_metas'][pair[0]]['center'],
+    #             data['img_metas'][pair[1]]['center'],
+    #         )
+
         with torch.no_grad():
             result = model(return_loss=False, return_heatmap=return_heatmaps, **data)
         results.append(result)

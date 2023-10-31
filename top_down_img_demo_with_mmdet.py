@@ -1,5 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import os
+from tqdm import tqdm
+import numpy as np
 import mmcv
 from mmcv.runner import load_checkpoint
 import warnings
@@ -15,6 +17,8 @@ try:
     has_mmdet = True
 except (ImportError, ModuleNotFoundError):
     has_mmdet = False
+
+from posevis import pose_visualization
 
 def my_init_pose_model(config, checkpoint=None, device='cuda:0'):
     """Initialize a pose model from config file.
@@ -125,15 +129,16 @@ def main():
         print("Running the mmpose on the whole folder")
         images_names = list(map(
             lambda x: os.path.join(image_name, x),
-            [dr for dr in os.listdir(image_name) if os.path.isfile(
-                os.path.join(image_name, dr)
+            [dr for dr in os.listdir(image_name) if (
+                os.path.isfile(os.path.join(image_name, dr)) and 
+                (dr.lower().endswith(".jpg") or dr.lower().endswith(".png") or dr.lower().endswith(".jpeg"))
             )]
         ))
     else:
         print("Running the mmpose on a single image")
         images_names = [image_name]
 
-    for img_i, image_name in enumerate(images_names):
+    for img_i, image_name in tqdm(enumerate(images_names), ascii=True):
         _, relative_image_name = os.path.split(image_name)
 
         # test a single image, the resulting box is (x1, y1, x2, y2)
@@ -142,6 +147,12 @@ def main():
         # keep the person class bounding boxes.
         person_results = process_mmdet_results(mmdet_results, args.det_cat_id)
 
+        # Select exactly N persons (the one with the most confidence)
+        N = 1
+        person_results = person_results[:N]
+        for i in range(len(person_results)):
+            person_results[i]["bbox"][4] = 1.0
+            
         # test a single image, with a list of bboxes.
 
         # optional
@@ -169,19 +180,39 @@ def main():
                 args.out_img_root,
                 "vis_{:s}".format(relative_image_name)
             )
-        
-        # show the results
-        vis_pose_result(
-            pose_model,
-            image_name,
-            pose_results,
-            dataset=dataset,
-            dataset_info=dataset_info,
-            kpt_score_thr=args.kpt_thr,
-            radius=args.radius,
-            thickness=args.thickness,
-            show=args.show,
-            out_file=out_file)
+
+        # Show the results using my visualization
+        for pose_result in pose_results:
+            kpts = pose_result['keypoints']
+            kpts[kpts[:, 2] >= args.kpt_thr, 2] = 2
+            kpts[kpts[:, 2] < args.kpt_thr, 2] = 0
+            pose_result['keypoints'] = kpts
+        try:
+            save_img = pose_visualization(
+                    image_name,
+                    pose_results,
+                    show_markers=True,
+                    line_type="solid",
+                    width_multiplier=2.0,
+                    show_bbox=True,
+                    differ_individuals=False,
+                )
+            mmcv.image.imwrite(save_img, out_file)
+        except:
+            print("Error while saving the image", image_name)
+
+        # # show the results
+        # vis_pose_result(
+        #     pose_model,
+        #     image_name,
+        #     pose_results,
+        #     dataset=dataset,
+        #     dataset_info=dataset_info,
+        #     kpt_score_thr=args.kpt_thr,
+        #     radius=args.radius,
+        #     thickness=args.thickness,
+        #     show=args.show,
+        #     out_file=out_file)
 
 
 if __name__ == '__main__':

@@ -396,6 +396,71 @@ def post_dark_udp(coords, batch_heatmaps, kernel=3):
     return coords
 
 
+def post_out_of_image(coords, heatmap_size, inf_strip_size, center, scale, img_size):
+    
+    coords = coords.astype(np.float32)
+
+    heatmap_size = np.array(heatmap_size)[::-1]
+    img_size = np.array(img_size)
+    fin_heatmap_size = heatmap_size / (1+2*inf_strip_size)
+    fin_stride = (img_size - 1.0) / (fin_heatmap_size - 1.0)
+    strip_size = (heatmap_size - fin_heatmap_size) / 2    
+    coef = np.log(9)
+ 
+    print()
+    print("coords range before clip", np.min(coords[:]), np.max(coords[:]), heatmap_size)
+    coords[:, :, 0] = np.clip(coords[:, :, 0], 0+1e-8, heatmap_size[0]-1)
+    coords[:, :, 1] = np.clip(coords[:, :, 1], 0+1e-8, heatmap_size[1]-1)
+    assert np.any(np.isnan(coords)) == False, 'NaN in coords before transformation'
+    print("coords range after clip", np.min(coords[:]), np.max(coords[:]), heatmap_size)
+
+    coords += 1e-9
+
+    # Transform X and Y coords to the original image space
+    for idx in [0, 1]:
+        x_before_img = coords[:, :, idx] < strip_size[idx]
+        x_after_img = coords[:, :, idx] > (heatmap_size[idx] - strip_size[idx])
+        x_in_img = np.logical_not(np.logical_or(x_before_img, x_after_img))
+
+        if np.any(x_in_img[:]):
+            coords[x_in_img, idx] = (coords[x_in_img, idx] - strip_size[idx]) * fin_stride[idx]
+            # assert np.logical_and(
+            #     np.all(coords[x_in_img, idx] >= 0),
+            #     np.all(coords[x_in_img, idx] <= heatmap_size[idx]),
+            # ), "Point(s) in the image are outside of the heatmap"
+        if np.any(x_before_img[:]):
+            coords[x_before_img, idx] = - np.log(2 * strip_size[idx] / (coords[x_before_img, idx]) - 1) / coef
+            
+            # De-normalize
+            coords[x_before_img, idx] *= heatmap_size[idx]
+            # assert np.all(coords[x_before_img, idx] <= 0), "Point(s) before image are in the heatmap"
+        if np.any(x_after_img[:]):
+            k = (coords[x_after_img, idx] - strip_size[idx] - fin_heatmap_size[idx]) / strip_size[idx] + 1/2
+            print("coords", coords[x_after_img, idx])
+            print("strip_size", strip_size[idx])
+            print("fin_heatmap_size", fin_heatmap_size[idx])
+            print(coords[x_after_img, idx])
+            print((coords[x_after_img, idx] - strip_size[idx] - fin_heatmap_size[idx]))
+            print((coords[x_after_img, idx] - strip_size[idx] - fin_heatmap_size[idx]) / strip_size[idx])
+            print("k range", np.min(k[:]), np.max(k[:]))
+            coords[x_after_img, idx] = - np.log(1/(k) - 1) / coef
+
+            # De-normalize
+            coords[x_after_img, idx] *= heatmap_size[idx]
+            coords[x_after_img, idx] += heatmap_size[idx]
+            # assert np.all(coords[x_after_img, idx] >= heatmap_size[idx]), "Point(s) after image are in the heatmap\n{}".format(coords[:, :, idx])
+
+
+    assert np.any(np.isnan(coords)) == False, 'NaN in coords'
+
+    # coords -= 1
+
+    coords = coords.astype(int)
+    coords = coords.astype(float)
+
+    return coords
+
+
 def _gaussian_blur(heatmaps, kernel=11):
     """Modulate heatmap distribution with Gaussian.
      sigma = 0.3*((kernel_size-1)*0.5-1)+0.8
@@ -479,7 +544,8 @@ def keypoints_from_heatmaps(heatmaps,
                             kernel=11,
                             valid_radius_factor=0.0546875,
                             use_udp=False,
-                            target_type='GaussianHeatmap'):
+                            target_type='GaussianHeatmap',
+                            inf_strip_size=0.1):
     """Get final keypoint predictions from heatmaps and transform them back to
     the image.
 
@@ -583,9 +649,20 @@ def keypoints_from_heatmaps(heatmaps,
             index += W * H * np.arange(0, N * K / 3)
             index = index.astype(int).reshape(N, K // 3, 1)
             preds += np.concatenate((offset_x[index], offset_y[index]), axis=2)
+        elif target_type.lower() == 'ProbabilityHeatMap'.lower():
+            preds, maxvals = _get_max_preds(heatmaps)
+            print("Preds after max")
+            print(preds)
+            # # preds = post_dark_udp(preds, heatmaps, kernel=kernel)
+            # print("Preds DARK UPD")
+            # print(preds)
+            preds = post_out_of_image(preds, heatmaps.shape[2:], inf_strip_size,
+                                      center=center, scale=scale, img_size=[W, H])
+            print("Preds after out-of-image")
+            print(preds)
         else:
             raise ValueError('target_type should be either '
-                             "'GaussianHeatmap' or 'CombinedTarget'")
+                             "'GaussianHeatmap', 'CombinedTarget' or 'ProbabilityHeatmap'")
     else:
         preds, maxvals = _get_max_preds(heatmaps)
         if post_process == 'unbiased':  # alleviate biased coordinate
@@ -612,9 +689,10 @@ def keypoints_from_heatmaps(heatmaps,
                             preds[n][k] += 0.5
 
     # Transform back to the image
-    for i in range(N):
-        preds[i] = transform_preds(
-            preds[i], center[i], scale[i], [W, H], use_udp=use_udp)
+    if target_type.lower() != 'ProbabilityHeatmap'.lower():
+        for i in range(N):
+            preds[i] = transform_preds(
+                preds[i], center[i], scale[i], [W, H], use_udp=use_udp)
 
     if post_process == 'megvii':
         maxvals = maxvals / 255.0 + 0.5

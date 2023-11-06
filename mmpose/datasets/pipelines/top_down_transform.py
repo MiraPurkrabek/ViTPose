@@ -63,7 +63,6 @@ class TopDownGetBboxCenterScale:
         self.padding = padding
 
     def __call__(self, results):
-
         if 'center' in results and 'scale' in results:
             warnings.warn(
                 'Use the "center" and "scale" that already exist in the data '
@@ -385,11 +384,12 @@ class TopDownGenerateTarget:
             Paper ref: Huang et al. The Devil is in the Details: Delving into
             Unbiased Data Processing for Human Pose Estimation (CVPR 2020).
         target_type (str): supported targets: 'GaussianHeatmap',
-            'CombinedTarget'. Default:'GaussianHeatmap'
+            'CombinedTarget' and 'ProbabilityHeatmap'. Default:'GaussianHeatmap'
             CombinedTarget: The combination of classification target
             (response map) and regression target (offset map).
             Paper ref: Huang et al. The Devil is in the Details: Delving into
             Unbiased Data Processing for Human Pose Estimation (CVPR 2020).
+            ProbabilityHeatmap: The heatmap enabling out-of-image prediction.
     """
 
     def __init__(self,
@@ -398,13 +398,15 @@ class TopDownGenerateTarget:
                  valid_radius_factor=0.0546875,
                  target_type='GaussianHeatmap',
                  encoding='MSRA',
-                 unbiased_encoding=False):
+                 unbiased_encoding=False,
+                 inf_strip_size=0.1):
         self.sigma = sigma
         self.unbiased_encoding = unbiased_encoding
         self.kernel = kernel
         self.valid_radius_factor = valid_radius_factor
         self.target_type = target_type
         self.encoding = encoding
+        self.inf_strip_size = inf_strip_size
 
     def _msra_generate_target(self, cfg, joints_3d, joints_3d_visible, sigma):
         """Generate the target heatmap via "MSRA" approach.
@@ -539,7 +541,7 @@ class TopDownGenerateTarget:
         return heatmaps, target_weight
 
     def _udp_generate_target(self, cfg, joints_3d, joints_3d_visible, factor,
-                             target_type):
+                             target_type, inf_strip_size):
         """Generate the target heatmap via 'UDP' approach. Paper ref: Huang et
         al. The Devil is in the Details: Delving into Unbiased Data Processing
         for Human Pose Estimation (CVPR 2020).
@@ -549,7 +551,7 @@ class TopDownGenerateTarget:
             - heatmap height: H
             - heatmap width: W
             - num target channels: C
-            - C = K if target_type=='GaussianHeatmap'
+            - C = K if target_type=='GaussianHeatmap' or 'ProbabilityHeatmap'
             - C = 3*K if target_type=='CombinedTarget'
 
         Args:
@@ -558,10 +560,12 @@ class TopDownGenerateTarget:
             joints_3d_visible (np.ndarray[K, 3]): Visibility of keypoints.
             factor (float): kernel factor for GaussianHeatmap target or
                 valid radius factor for CombinedTarget.
-            target_type (str): 'GaussianHeatmap' or 'CombinedTarget'.
+            target_type (str): 'GaussianHeatmap', 'CombinedTarget' or 'ProbabilityHeatmap'.
                 GaussianHeatmap: Heatmap target with gaussian distribution.
                 CombinedTarget: The combination of classification target
                 (response map) and regression target (offset map).
+                ProbabilityHeatmap: The heatmap enabling out-of-image prediction.
+            inf_strip_size (float): Size of the infinity strip for ProbabilityHeatmap.
 
         Returns:
             tuple: A tuple containing targets.
@@ -651,9 +655,105 @@ class TopDownGenerateTarget:
                     target[joint_id, 2, keep_pos] = y_offset[keep_pos]
             target = target.reshape(num_joints * 3, heatmap_size[1],
                                     heatmap_size[0])
+        elif target_type.lower() == 'ProbabilityHeatmap'.lower():
+            target = np.zeros((num_joints, heatmap_size[1], heatmap_size[0]),
+                              dtype=np.float32)
+
+            # print("\nNew ProbabilityHeatmap")
+
+            fin_heatmap_size = heatmap_size / (1+2*inf_strip_size)
+            strip_size = (heatmap_size - fin_heatmap_size) / 2
+            fin_stride = (image_size - 1.0) / (fin_heatmap_size - 1.0)
+
+            out_mu = []
+
+            for joint_id in range(num_joints):
+                kpt_vis = int(joints_3d_visible[joint_id, 0])
+                # kp_x, kp_y = joints_3d[joint_id, 0], joints_3d[joint_id, 1]
+
+                f = factor
+                
+                # Transform X coordinate to the heatmap space
+                out_of_image = False
+                coef = np.log(9)
+                mu = [None, None]
+                for i in [0, 1]:
+                    kp = joints_3d[joint_id, i]
+                    if kp < 0:
+                        kp_norm = kp / image_size[i]
+                        mu[i] = 1 / (1 + np.exp(-kp_norm*coef)) * 2 * strip_size[i]
+                        out_of_image = True
+                    elif kp > image_size[i]:
+                        kp_norm = (kp - image_size[i]) / image_size[i]
+                        sigmoid = (1 / (1 + np.exp(-kp_norm * coef)))
+                        mu[i] = strip_size[i] + fin_heatmap_size[i] + (sigmoid - 0.5) * strip_size[i] 
+                        out_of_image = True
+                    else:
+                        mu[i] = strip_size[i] + (kp / fin_stride[i])
+                
+                mu_x, mu_y = mu[0], mu[1]
+                out_mu.append([mu_x, mu_y])
+
+                assert mu_x >= 0 and mu_x <= heatmap_size[0]
+                assert mu_y >= 0 and mu_y <= heatmap_size[1]
+
+                if kpt_vis == 0:
+                    # Unannotated kpt -> generate uniform distribution
+                    target[joint_id] = 1.0 / (heatmap_size[0] * heatmap_size[1])
+                    continue
+                elif out_of_image:
+                    # All annotated points out of image will have flat gaussian
+                    f *= 3
+                elif kpt_vis == 1:
+                    # Invisible kpt -> generate gaussian with big variance
+                    f *= 2
+                elif kpt_vis == 3:
+                    # Guesstimated kpt -> generate gaussian with biger variance
+                    f *= 3
+                elif kpt_vis == 2:
+                    # Visible kpt -> generate gaussian with normal variance
+                    pass
+                else:
+                    raise ValueError("Unexpected combination of visibility ({}) and out-of-image ({})".format(kpt_vis, out_of_image))
+
+                # prepare for gaussian
+                tmp_size = f * 3
+                size = 2 * tmp_size + 1
+                x = np.arange(0, size, 1, np.float32)
+                y = x[:, None]
+
+                # Generate gaussian
+                mu_x_ac = mu_x
+                mu_y_ac = mu_y
+                x0 = y0 = size // 2
+                x0 += mu_x_ac - mu_x
+                y0 += mu_y_ac - mu_y
+                g = np.exp(-((x - x0)**2 + (y - y0)**2) / (2 * f**2))
+                
+                # Usable gaussian range
+                ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
+                br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
+                g_x = max(0, -ul[0]), min(br[0], heatmap_size[0]) - ul[0]
+                g_y = max(0, -ul[1]), min(br[1], heatmap_size[1]) - ul[1]
+                # Image range
+                img_x = max(0, ul[0]), min(br[0], heatmap_size[0])
+                img_y = max(0, ul[1]), min(br[1], heatmap_size[1])
+
+                v = target_weight[joint_id]
+                if v > 0.5:
+                    target[joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
+                        g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
+                    
+                # Normalize the target such that it sums to 1
+                target[joint_id] /= np.sum(target[joint_id])
+
+            print("Out of image MUs:")
+            for m in out_mu:
+                print(m)
+
         else:
             raise ValueError('target_type should be either '
-                             "'GaussianHeatmap' or 'CombinedTarget'")
+                             "'GaussianHeatmap', 'CombinedTarget' or 'ProbabilityHeatmap'")
 
         if use_different_joint_weights:
             target_weight = np.multiply(target_weight, joint_weights)
@@ -716,9 +816,12 @@ class TopDownGenerateTarget:
             elif self.target_type.lower() == 'GaussianHeatmap'.lower():
                 factors = self.sigma
                 channel_factor = 1
+            elif self.target_type.lower() == 'ProbabilityHeatmap'.lower():
+                factors = self.sigma
+                channel_factor = 1
             else:
                 raise ValueError('target_type should be either '
-                                 "'GaussianHeatmap' or 'CombinedTarget'")
+                                 "'GaussianHeatmap', 'CombinedTarget' or 'ProbabilityHeatmap'")
             if isinstance(factors, list):
                 num_factors = len(factors)
                 cfg = results['ann_info']
@@ -731,14 +834,14 @@ class TopDownGenerateTarget:
                 for i in range(num_factors):
                     target_i, target_weight_i = self._udp_generate_target(
                         cfg, joints_3d, joints_3d_visible, factors[i],
-                        self.target_type)
+                        self.target_type, self.inf_strip_size)
                     target = np.concatenate([target, target_i[None]], axis=0)
                     target_weight = np.concatenate(
                         [target_weight, target_weight_i[None]], axis=0)
             else:
                 target, target_weight = self._udp_generate_target(
                     results['ann_info'], joints_3d, joints_3d_visible, factors,
-                    self.target_type)
+                    self.target_type, self.inf_strip_size)
         else:
             raise ValueError(
                 f'Encoding approach {self.encoding} is not supported!')

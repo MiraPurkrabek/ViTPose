@@ -321,7 +321,7 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
 
             keypoints = np.array(obj['keypoints']).reshape(-1, 3)
             joints_3d[:, :2] = keypoints[:, :2]
-            joints_3d_visible[:, :2] = np.minimum(1, keypoints[:, 2:3])
+            joints_3d_visible[:, :2] = keypoints[:, 2:3]        # Check if this change did not break COCOeval
 
             image_file = osp.join(self.img_prefix, self.id2name[img_id])
             rec.append({

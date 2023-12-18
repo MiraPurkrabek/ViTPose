@@ -1,6 +1,6 @@
 # COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_TOP/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
+COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_seq_test/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_test/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_val/"
@@ -10,10 +10,10 @@
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_TB_benchmark/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_bbox/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/WEPDTOF-Pose/full_COCO-like/"
-COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
 
 VAL_COCO_ROOT = COCO_ROOT
 BATCH_SIZE = 64
+PADDING = 1.25
     
 _base_ = [
     '../../../../_base_/default_runtime.py',
@@ -128,7 +128,7 @@ data_cfg = dict(
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.00),
+    dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownRandomFlip', flip_prob=0.5),
     dict(
         type='TopDownHalfBodyTransform',
@@ -158,7 +158,7 @@ train_pipeline = [
 
 val_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.00),
+    dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(

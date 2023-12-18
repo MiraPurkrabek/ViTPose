@@ -1,9 +1,9 @@
-COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_RePoGen_3k_TOP_with_COCO/'
-VAL_COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_val"
+COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_3k_BOTTOM_with_COCO'
+VAL_COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_val"
 # VAL_COCO_ROOT = COCO_ROOT
-BATCH_SIZE = 128
+BATCH_SIZE = 16
 
-load_from = "models/pretrained/vitpose-s.pth"
+load_from = "models/pretrained/vitpose-h.pth"
 
 _base_ = [
     '../../../../_base_/default_runtime.py',
@@ -11,11 +11,11 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=5e-5, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=1e-5, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
-                                    num_layers=12, 
-                                    layer_decay_rate=0.8,
+                                    num_layers=32, 
+                                    layer_decay_rate=0.85,
                                     custom_keys={
                                             'bias': dict(decay_multi=0.),
                                             'pos_embed': dict(decay_mult=0.),
@@ -31,10 +31,10 @@ optimizer_config = dict(grad_clip=dict(max_norm=1., norm_type=2))
 lr_config = dict(
     policy='step',
     warmup='linear',
-    warmup_iters=300,
+    warmup_iters=100,
     warmup_ratio=0.001,
-    step=[350, 900])
-total_epochs = 1000
+    step=[70, 95])
+total_epochs = 100
 log_config = dict(
     interval=1,
     hooks=[
@@ -60,18 +60,18 @@ model = dict(
         type='ViT',
         img_size=(256, 192),
         patch_size=16,
-        embed_dim=384,
-        depth=12,
-        num_heads=12,
+        embed_dim=1280,
+        depth=32,
+        num_heads=16,
         ratio=1,
         use_checkpoint=False,
         mlp_ratio=4,
         qkv_bias=True,
-        drop_path_rate=0.1,
+        drop_path_rate=0.55,
     ),
     keypoint_head=dict(
         type='TopdownHeatmapSimpleHead',
-        in_channels=384,
+        in_channels=1280,
         num_deconv_layers=2,
         num_deconv_filters=(256, 256),
         num_deconv_kernels=(4, 4),

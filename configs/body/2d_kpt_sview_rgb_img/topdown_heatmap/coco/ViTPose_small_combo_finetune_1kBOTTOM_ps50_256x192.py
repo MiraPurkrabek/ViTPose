@@ -1,9 +1,9 @@
-COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_3k_BOTTOM_with_COCO'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_RePoGen_1k_BOTTOM_ps5_with_COCO/'
 VAL_COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_val"
 # VAL_COCO_ROOT = COCO_ROOT
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 
-load_from = "models/pretrained/vitpose-h.pth"
+load_from = "models/pretrained/vitpose-s.pth"
 
 _base_ = [
     '../../../../_base_/default_runtime.py',
@@ -11,11 +11,11 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=1e-5, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=5e-5, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
-                                    num_layers=32, 
-                                    layer_decay_rate=0.85,
+                                    num_layers=12, 
+                                    layer_decay_rate=0.8,
                                     custom_keys={
                                             'bias': dict(decay_multi=0.),
                                             'pos_embed': dict(decay_mult=0.),
@@ -33,8 +33,8 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=300,
     warmup_ratio=0.001,
-    step=[350, 900])
-total_epochs = 1000
+    step=[400, 480])
+total_epochs = 500
 log_config = dict(
     interval=1,
     hooks=[
@@ -60,18 +60,18 @@ model = dict(
         type='ViT',
         img_size=(256, 192),
         patch_size=16,
-        embed_dim=1280,
-        depth=32,
-        num_heads=16,
+        embed_dim=384,
+        depth=12,
+        num_heads=12,
         ratio=1,
         use_checkpoint=False,
         mlp_ratio=4,
         qkv_bias=True,
-        drop_path_rate=0.55,
+        drop_path_rate=0.1,
     ),
     keypoint_head=dict(
         type='TopdownHeatmapSimpleHead',
-        in_channels=1280,
+        in_channels=384,
         num_deconv_layers=2,
         num_deconv_filters=(256, 256),
         num_deconv_kernels=(4, 4),
@@ -112,7 +112,7 @@ train_pipeline = [
         num_joints_half_body=8,
         prob_half_body=0.3),
     dict(
-        type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.5),
+        type='TopDownGetRandomScaleRotation', rot_factor=120, scale_factor=0.5),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(

@@ -1,7 +1,7 @@
-COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_RePoGen_3k_TOP_with_COCO/'
-VAL_COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_val"
+COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_3k_BOTTOM_with_COCO'
+VAL_COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_val"
 # VAL_COCO_ROOT = COCO_ROOT
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 
 load_from = "models/pretrained/vitpose-s.pth"
 
@@ -11,7 +11,7 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=5e-5, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=1e-4, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=12, 
@@ -31,10 +31,10 @@ optimizer_config = dict(grad_clip=dict(max_norm=1., norm_type=2))
 lr_config = dict(
     policy='step',
     warmup='linear',
-    warmup_iters=300,
+    warmup_iters=100,
     warmup_ratio=0.001,
-    step=[350, 900])
-total_epochs = 1000
+    step=[40, 47])
+total_epochs = 50
 log_config = dict(
     interval=1,
     hooks=[
@@ -55,7 +55,7 @@ channel_cfg = dict(
 # model settings
 model = dict(
     type='TopDown',
-    pretrained=None,
+    pretrained=load_from,
     backbone=dict(
         type='ViT',
         img_size=(256, 192),

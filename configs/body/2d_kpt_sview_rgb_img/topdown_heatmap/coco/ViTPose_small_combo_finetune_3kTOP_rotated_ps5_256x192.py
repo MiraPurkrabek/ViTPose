@@ -1,4 +1,4 @@
-COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_RePoGen_3k_TOP_with_COCO/'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_RePoGen_3k_TOP_ps5_with_COCO/'
 VAL_COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_val"
 # VAL_COCO_ROOT = COCO_ROOT
 BATCH_SIZE = 128

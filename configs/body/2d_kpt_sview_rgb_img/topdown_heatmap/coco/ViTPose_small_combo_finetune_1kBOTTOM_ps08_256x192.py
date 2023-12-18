@@ -1,5 +1,5 @@
-COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_RePoGen_3k_TOP_with_COCO/'
-VAL_COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_val"
+COCO_ROOT = '/datagrid/personal/purkrmir/data/SyntheticPose/ViTPose_finetune_RePoGen_1k_BOTTOM_ps08_with_COCO/'
+VAL_COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_val"
 # VAL_COCO_ROOT = COCO_ROOT
 BATCH_SIZE = 128
 
@@ -33,8 +33,8 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=300,
     warmup_ratio=0.001,
-    step=[350, 900])
-total_epochs = 1000
+    step=[400, 480])
+total_epochs = 500
 log_config = dict(
     interval=1,
     hooks=[

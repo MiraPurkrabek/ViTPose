@@ -18,16 +18,17 @@ then
         --master_port=$PORT \
         $(dirname "$0")/train.py \
         $CONFIG \
-        --launcher pytorch ${@:3}
+        --launcher pytorch ${@:4}
 else
     python -m torch.distributed.launch \
         --nproc_per_node=$GPUS \
         --master_port=$PORT \
         $(dirname "$0")/train.py \
         $CONFIG \
-        --cfg-options model.load_from=$WEIGHTS \
-        --launcher pytorch ${@:3}
+        --resume-from $WEIGHTS \
+        --launcher pytorch ${@:4}
 fi
 
 
+        # --cfg-options model.load_from=$WEIGHTS \
 

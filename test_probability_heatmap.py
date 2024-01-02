@@ -21,7 +21,6 @@ HEATMAP_TYPE = 'ProbabilityHeatmap'
 # HEATMAP_TYPE = 'GaussianHeatmap'
 
 IMG_SIZE = np.array([192, 256])
-HEATMAP_SIZE = np.array([40, 53])
 N = 6
 
 def test_generate_target(input_data, save_dir="TargetTest", show=True):
@@ -54,7 +53,7 @@ def test_generate_target(input_data, save_dir="TargetTest", show=True):
             save_path = os.path.join(save_dir, "heatmap_{:03d}.png".format(i))
             cv2.imwrite(save_path, hmp)
 
-    return heatmaps
+    return heatmaps, target
 
 
 def test_keypoints_from_heatmaps(heatmaps, results):
@@ -101,17 +100,27 @@ if __name__ == "__main__":
     input_data = dataset[np.random.randint(0, len(dataset))]
     
 
-    kpts_gt = deepcopy(input_data["joints_3d"][:, :2])
-    scale = input_data["scale"]
-    center = input_data["center"]
+    # kpts_gt = deepcopy(input_data["joints_3d"][:, :2])
+    # scale = input_data["scale"]
+    # center = input_data["center"]
+    # vis = input_data["joints_3d_visible"][:, 0].squeeze()
+    # n = len(kpts_gt)
+
+    heatmaps, target = test_generate_target(input_data, show=True)
+    kpts_gt = target["joints_3d"][:, :2]
+    scale = target["scale"]
+    center = target["center"]
+    vis = target["joints_3d_visible"][:, 0].squeeze()
     kpts_gt[:, 0] = kpts_gt[:, 0] / (IMG_SIZE[0]-1.0) * (200 * scale[0]) + center[0] - (100 * scale[0])
     kpts_gt[:, 1] = kpts_gt[:, 1] / (IMG_SIZE[1]-1.0) * (200 * scale[1]) + center[1] - (100 * scale[1])
-    vis = input_data["joints_3d_visible"][:, 0].squeeze()
+    print("kpts shaoe", kpts_gt.shape)
     n = len(kpts_gt)
 
-    heatmaps = test_generate_target(input_data, show=True)
+    print("Center: ", center, input_data["center"])
+    print("Scale: ", scale, input_data["scale"])
+    print(target.keys())
 
-    kpts_test = test_keypoints_from_heatmaps(heatmaps, input_data)
+    kpts_test = test_keypoints_from_heatmaps(heatmaps, target)
     kpts_test = kpts_test.squeeze()
 
     pt_dists = []
@@ -129,7 +138,6 @@ if __name__ == "__main__":
         ))
     
     print("Mean: {:.2f}".format(np.mean(pt_dists)))
-
 
 
     max_x = np.max(kpts_gt[:, 0])
@@ -153,6 +161,13 @@ if __name__ == "__main__":
     test_img = pose_visualization(test_img, gt, format="coco", line_type="dashed", show_bbox=True, width_multiplier=3.0)
     test_img = pose_visualization(test_img, kpts_test, format="coco", line_type="solid", width_multiplier=3.0)
     cv2.imwrite("TargetTest/00_pose.png", test_img)
+    
+    intest_img = target["img"].numpy().transpose(1, 2, 0)
+    intest_img -= np.min(intest_img)
+    intest_img /= np.max(intest_img)
+    intest_img *= 255
+    intest_img = intest_img.astype(np.uint8)
+    cv2.imwrite("TargetTest/00_pose_input.png", intest_img)
     
     blank_img = np.ones((int(max_y+1), int(max_x+1), 3), dtype=np.uint8)*255
     blank_img = pose_visualization(blank_img, gt, format="coco", line_type="dashed", show_bbox=True, width_multiplier=3.0)

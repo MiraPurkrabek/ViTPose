@@ -94,7 +94,7 @@ model = dict(
 
 data_cfg = dict(
     image_size=[192, 256],
-    heatmap_size=[48, 64],
+    heatmap_size=[48*1, 64*1],
     num_output_channels=channel_cfg['num_output_channels'],
     num_joints=channel_cfg['dataset_joints'],
     dataset_channel=channel_cfg['dataset_channel'],
@@ -135,9 +135,9 @@ train_pipeline = [
     #     type='TopDownHalfBodyTransform',
     #     num_joints_half_body=8,
     #     prob_half_body=0.3),
-    # dict(
-    #     type='TopDownGetRandomScaleRotation', rot_factor=10, scale_factor=0.5),
-    dict(type='TopDownRandomCrop', min_joints_crop=5, prob_random_crop=0.8),
+    dict(
+        type='TopDownGetRandomScaleRotation', rot_factor=30, scale_factor=0.2),
+    dict(type='TopDownRandomCrop', min_joints_crop=3, prob_random_crop=0.8),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(

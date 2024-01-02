@@ -276,26 +276,45 @@ class TopDownRandomCrop:
     @staticmethod
     def random_crop(cfg, joints_3d, joints_3d_visible, min_joints_crop=3):
         """Get center&scale for random crop."""
+        
+        weights = np.array([
+            2,      # Nose
+            2, 2,   # LREye
+            2, 2,   # LREar
+            1, 1,   # LRShoulder
+            4, 4,   # LRElbow
+            5, 5,   # LRWrist
+            1, 1,   # LRHip
+            4, 4,   # LRKnee
+            5, 5,   # LRAnkle
+        ],dtype=np.float32)
+        
         selected_joints = []
+        selected_weights = []
         for joint_id in range(cfg['num_joints']):
             if joints_3d_visible[joint_id][0] > 0:
                 selected_joints.append(joints_3d[joint_id])
+                selected_weights.append(weights[joint_id])
 
         selected_joints = np.array(selected_joints, dtype=np.float32)
+        selected_weights = np.array(selected_weights, dtype=np.float32)
+        selected_weights = selected_weights / np.sum(selected_weights)
         print("Pre-Selected joints: {}".format(selected_joints))
-        
+
         # Randomly choose subset of joints
-        # num_selected_joints = np.random.randint(
-        #     min_joints_crop, 
-        #     len(selected_joints)-1
-        # )
+        num_selected_joints = np.random.randint(
+            min_joints_crop, 
+            len(selected_joints)-3
+        )
+        print("Num selected joints: {}".format(num_selected_joints))
         # num_selected_joints = 3
-        # selected_joints = selected_joints[np.random.choice(
-        #     len(selected_joints), 
-        #     num_selected_joints, 
-        #     replace=False
-        # )]
-        selected_joints = selected_joints[:8]
+        selected_joints = selected_joints[np.random.choice(
+            len(selected_joints), 
+            num_selected_joints, 
+            replace=False, 
+            p = selected_weights,
+        )]
+        # selected_joints = selected_joints[:8]
         print("Selected joints: {}".format(selected_joints))
         
         if len(selected_joints) < 2:
@@ -320,7 +339,7 @@ class TopDownRandomCrop:
             w = h * aspect_ratio
 
         scale = np.array([w / 200.0, h / 200.0], dtype=np.float32)
-        scale = scale * 1.1
+        scale = scale * 1.0
         return center, scale
     
 
@@ -331,7 +350,7 @@ class TopDownRandomCrop:
         joints_3d = results['joints_3d']
         joints_3d_visible = results['joints_3d_visible']
         rand_num = np.random.rand()
-        rand_num = 0.0
+        # rand_num = 0.0
 
         if (np.sum(joints_3d_visible[:, 0]) > self.min_joints_crop
                 and rand_num < self.prob_random_crop):
@@ -819,13 +838,13 @@ class TopDownGenerateTarget:
                     continue
                 elif out_of_image:
                     # All annotated points out of image will have flat gaussian
-                    f *= 3
+                    f *= 5
                 elif kpt_vis == 1:
                     # Invisible kpt -> generate gaussian with big variance
-                    f *= 2
+                    f *= 3
                 elif kpt_vis == 3:
                     # Guesstimated kpt -> generate gaussian with biger variance
-                    f *= 3
+                    f *= 5
                 elif kpt_vis == 2:
                     # Visible kpt -> generate gaussian with normal variance
                     pass

@@ -177,15 +177,8 @@ def transform_preds(coords, center, scale, output_size, use_udp=False):
     assert len(scale) == 2
     assert len(output_size) == 2
 
-    print("Coords at the beginning of the post_transforms.py: ")
-    print(coords)
-
-    print("Center: ", center)
-    print("Scale: ", scale)
-
     # Recover the scale which is normalized by a factor of 200.
     scale = scale * 200.0
-    print("Scale after multiplying by 200: ", scale)
 
     if use_udp:
         scale_x = scale[0] / (output_size[0] - 1.0)
@@ -194,15 +187,10 @@ def transform_preds(coords, center, scale, output_size, use_udp=False):
         scale_x = scale[0] / output_size[0]
         scale_y = scale[1] / output_size[1]
 
-    print("Scale_x: ", scale_x)
-    print("Scale_y: ", scale_y)
-
     target_coords = np.ones_like(coords)
     target_coords[:, 0] = coords[:, 0] * scale_x + center[0] - scale[0] * 0.5
     target_coords[:, 1] = coords[:, 1] * scale_y + center[1] - scale[1] * 0.5
 
-    print("Coords at the end of the post_transforms.py: ")
-    print(target_coords)
     return target_coords
 
 

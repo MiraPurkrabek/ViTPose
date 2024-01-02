@@ -299,23 +299,18 @@ class TopDownRandomCrop:
         selected_joints = np.array(selected_joints, dtype=np.float32)
         selected_weights = np.array(selected_weights, dtype=np.float32)
         selected_weights = selected_weights / np.sum(selected_weights)
-        print("Pre-Selected joints: {}".format(selected_joints))
-
+        
         # Randomly choose subset of joints
         num_selected_joints = np.random.randint(
             min_joints_crop, 
             len(selected_joints)-3
         )
-        print("Num selected joints: {}".format(num_selected_joints))
-        # num_selected_joints = 3
         selected_joints = selected_joints[np.random.choice(
             len(selected_joints), 
             num_selected_joints, 
             replace=False, 
             p = selected_weights,
         )]
-        # selected_joints = selected_joints[:8]
-        print("Selected joints: {}".format(selected_joints))
         
         if len(selected_joints) < 2:
             return None, None
@@ -328,8 +323,6 @@ class TopDownRandomCrop:
 
         w = right_bottom[0] - left_top[0]
         h = right_bottom[1] - left_top[1]
-
-        print("new bbox", left_top, right_bottom)
 
         aspect_ratio = cfg['image_size'][0] / cfg['image_size'][1]
 
@@ -346,7 +339,6 @@ class TopDownRandomCrop:
     def __call__(self, results):
         """Perform data augmentation with random crop."""
         
-        print("Random Crop called!")
         joints_3d = results['joints_3d']
         joints_3d_visible = results['joints_3d_visible']
         rand_num = np.random.rand()
@@ -355,10 +347,8 @@ class TopDownRandomCrop:
         if (np.sum(joints_3d_visible[:, 0]) > self.min_joints_crop
                 and rand_num < self.prob_random_crop):
 
-            print("Center: {}\nScale: {}".format(results['center'], results['scale']))
             c_crop, s_crop = self.random_crop(
                 results['ann_info'], joints_3d, joints_3d_visible, self.min_joints_crop)
-            print("New Center: {}\nNew Scale: {}".format(c_crop, s_crop))
 
             if c_crop is not None and s_crop is not None:
                 results['center'] = c_crop
@@ -719,7 +709,6 @@ class TopDownGenerateTarget:
 
             for joint_id in range(num_joints):
                 feat_stride = (image_size - 1.0) / (heatmap_size - 1.0)
-                # print("feat_stride", feat_stride)
                 mu_x = int(joints_3d[joint_id][0] / feat_stride[0] + 0.5)
                 mu_y = int(joints_3d[joint_id][1] / feat_stride[1] + 0.5)
                 out_mu.append([mu_x, mu_y])
@@ -751,9 +740,6 @@ class TopDownGenerateTarget:
                 if v > 0.5:
                     target[joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
                         g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
-            print("Out of image MUs:")
-            for m in out_mu:
-                print(m)
 
         elif target_type.lower() == 'CombinedTarget'.lower():
             target = np.zeros(
@@ -788,13 +774,9 @@ class TopDownGenerateTarget:
             target = np.zeros((num_joints, heatmap_size[1], heatmap_size[0]),
                               dtype=np.float32)
 
-            # print("\nNew ProbabilityHeatmap")
-
             fin_heatmap_size = heatmap_size / (1+2*inf_strip_size)
             strip_size = (heatmap_size - fin_heatmap_size) / 2
             fin_stride = (image_size - 1.0) / (fin_heatmap_size - 1.0)
-
-            print("fin_stride", fin_stride)
 
             out_mu = []
             out_mu_acc = []
@@ -809,14 +791,11 @@ class TopDownGenerateTarget:
                 out_of_image = False
                 coef = np.log(9)
                 mu = [None, None]
-                print("image_size", image_size)
                 for i in [0, 1]:
                     kp = joints_3d[joint_id, i]
                     if kp < 0:
                         kp_norm = kp / image_size[i]
                         mu[i] = 1 / (1 + np.exp(-kp_norm*coef)) * 2 * strip_size[i]
-                        print("kp < 0")
-                        print(kp, kp_norm, mu[i])
                         out_of_image = True
                     elif kp > image_size[i]:
                         kp_norm = (kp - image_size[i]) / image_size[i]
@@ -883,13 +862,6 @@ class TopDownGenerateTarget:
                     
                 # Normalize the target such that it sums to 1
                 target[joint_id] /= np.sum(target[joint_id])
-
-            print("Out of image MUs:")
-            for m in out_mu:
-                print(m)
-            print("Out of image MUs (without strip):")
-            for m in out_mu:
-                print(m - strip_size)
 
         else:
             raise ValueError('target_type should be either '

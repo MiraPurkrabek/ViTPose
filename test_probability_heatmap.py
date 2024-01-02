@@ -7,6 +7,9 @@ from mmpose.datasets import build_dataset
 from mmpose.datasets import build_dataloader
 from mmcv import Config
 import torch
+from copy import deepcopy
+
+from posevis import pose_visualization
 
 # type='TopDownGenerateTarget',
 #         sigma=2,
@@ -23,7 +26,7 @@ N = 6
 
 def test_generate_target(input_data, save_dir="TargetTest", show=True):
     target_generator = TopDownGenerateTarget(
-        sigma=2,
+        sigma=2.0,
         encoding='UDP',
         target_type=HEATMAP_TYPE,
         inf_strip_size=0.1,
@@ -95,9 +98,14 @@ if __name__ == "__main__":
     
     cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/out_of_image_heatmap/coco/ViTPose_small_coco_256x192.py")
     dataset = build_dataset(cfg.data.train)
-    input_data = dataset[0]
+    input_data = dataset[np.random.randint(0, len(dataset))]
+    
 
-    kpts_gt = input_data["joints_3d"][:, :2]
+    kpts_gt = deepcopy(input_data["joints_3d"][:, :2])
+    scale = input_data["scale"]
+    center = input_data["center"]
+    kpts_gt[:, 0] = kpts_gt[:, 0] / (IMG_SIZE[0]-1.0) * (200 * scale[0]) + center[0] - (100 * scale[0])
+    kpts_gt[:, 1] = kpts_gt[:, 1] / (IMG_SIZE[1]-1.0) * (200 * scale[1]) + center[1] - (100 * scale[1])
     vis = input_data["joints_3d_visible"][:, 0].squeeze()
     n = len(kpts_gt)
 
@@ -106,8 +114,11 @@ if __name__ == "__main__":
     kpts_test = test_keypoints_from_heatmaps(heatmaps, input_data)
     kpts_test = kpts_test.squeeze()
 
+    pt_dists = []
     for i in range(n):
         pt_dist = np.sqrt((kpts_gt[i, 0] - kpts_test[i, 0]) ** 2 + (kpts_gt[i, 1] - kpts_test[i, 1]) ** 2)
+        if not vis[i].astype(int).item() == 0:
+            pt_dists.append(pt_dist)
         print("({:6.1f}, {:6.1f}) --> ({:6.1f}, {:6.1f})\t{:d}, {:7.2f}".format(
             kpts_gt[i, 0].astype(float),
             kpts_gt[i, 1].astype(float),
@@ -116,5 +127,38 @@ if __name__ == "__main__":
             vis[i].astype(int).item(),
             pt_dist,
         ))
+    
+    print("Mean: {:.2f}".format(np.mean(pt_dists)))
+
+
+
+    max_x = np.max(kpts_gt[:, 0])
+    max_y = np.max(kpts_gt[:, 1])
+    max_x = np.max([max_x, np.max(kpts_test[:, 0])])
+    max_y = np.max([max_y, np.max(kpts_test[:, 1])])
+    
+    vis = vis.astype(int)
+    kpts_gt = np.hstack((kpts_gt, np.expand_dims(vis, axis=1)))
+    gt = {
+        "keypoints": kpts_gt,
+        "bbox": [
+            center[0] - scale[0]*100, 
+            center[1] - scale[1]*100, 
+            center[0] + scale[0]*100, 
+            center[1] + scale[1]*100, 
+        ],
+    }
+    kpts_test = np.hstack((kpts_test, np.expand_dims(vis, axis=1)))
+    test_img = cv2.imread(input_data["image_file"])
+    test_img = pose_visualization(test_img, gt, format="coco", line_type="dashed", show_bbox=True, width_multiplier=3.0)
+    test_img = pose_visualization(test_img, kpts_test, format="coco", line_type="solid", width_multiplier=3.0)
+    cv2.imwrite("TargetTest/00_pose.png", test_img)
+    
+    blank_img = np.ones((int(max_y+1), int(max_x+1), 3), dtype=np.uint8)*255
+    blank_img = pose_visualization(blank_img, gt, format="coco", line_type="dashed", show_bbox=True, width_multiplier=3.0)
+    blank_img = pose_visualization(blank_img, kpts_test, format="coco", line_type="solid", width_multiplier=3.0)
+    cv2.imwrite("TargetTest/00_pose_blank.png", blank_img)
+
+    
 
     # print(kpts_test)

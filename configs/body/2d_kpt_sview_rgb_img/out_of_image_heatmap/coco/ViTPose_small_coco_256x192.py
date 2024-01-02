@@ -13,7 +13,7 @@ COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
 
 VAL_COCO_ROOT = COCO_ROOT
-BATCH_SIZE = 64
+BATCH_SIZE = 1
     
 _base_ = [
     '../../../../_base_/default_runtime.py',
@@ -45,6 +45,7 @@ lr_config = dict(
     warmup_ratio=0.001,
     step=[170, 200])
 total_epochs = 210
+# target_type = 'GaussianHeatmap'
 target_type = 'ProbabilityHeatmap'
 channel_cfg = dict(
     num_output_channels=17,
@@ -135,7 +136,8 @@ train_pipeline = [
     #     num_joints_half_body=8,
     #     prob_half_body=0.3),
     # dict(
-    #     type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.5),
+    #     type='TopDownGetRandomScaleRotation', rot_factor=10, scale_factor=0.5),
+    dict(type='TopDownRandomCrop', min_joints_crop=5, prob_random_crop=0.8),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(
@@ -144,14 +146,14 @@ train_pipeline = [
         std=[0.229, 0.224, 0.225]),
     dict(
         type='TopDownGenerateTarget',
-        sigma=2,
+        sigma=2.0,
         encoding='UDP',
         target_type=target_type,
         inf_strip_size=0.1),
     dict(
         type='Collect',
         keys=['img', 'target', 'target_weight',
-              'joints_3d', 'joints_3d_visible', 'center', 'scale', 'ann_info'
+              'joints_3d', 'joints_3d_visible', 'image_file', 'center', 'scale', 'ann_info' # Comment for training, used for test_probability_heatmap.py
             ],
         meta_keys=[
             'image_file', 'joints_3d', 'joints_3d_visible', 'center', 'scale',

@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from typing import Any
 import cv2
 
 import cv2
@@ -248,6 +249,108 @@ class TopDownHalfBodyTransform:
             if c_half_body is not None and s_half_body is not None:
                 results['center'] = c_half_body
                 results['scale'] = s_half_body
+
+        return results
+    
+@PIPELINES.register_module()
+class TopDownRandomCrop:
+    """Data augmentation with random cropping. Crop the image by a pseudo-random
+    amount. Keeps the 
+
+    Required keys: 'joints_3d', 'joints_3d_visible', and 'ann_info'.
+
+    Modifies key: 'scale' and 'center'.
+
+    Args:
+        min_joints_crop (int): The minimum number of joints that should
+        be kept in the image. If the image has fewer number of joints
+        (< min_joints_crop), ignore this step.
+        prob_random_crop (float): Probability of random crop.
+    """
+
+    def __init__(self, min_joints_crop=5, prob_random_crop=0.8):
+        self.min_joints_crop = min_joints_crop
+        self.prob_random_crop = prob_random_crop
+        
+
+    @staticmethod
+    def random_crop(cfg, joints_3d, joints_3d_visible, min_joints_crop=3):
+        """Get center&scale for random crop."""
+        selected_joints = []
+        for joint_id in range(cfg['num_joints']):
+            if joints_3d_visible[joint_id][0] > 0:
+                selected_joints.append(joints_3d[joint_id])
+
+        selected_joints = np.array(selected_joints, dtype=np.float32)
+        print("Pre-Selected joints: {}".format(selected_joints))
+        
+        # Randomly choose subset of joints
+        # num_selected_joints = np.random.randint(
+        #     min_joints_crop, 
+        #     len(selected_joints)-1
+        # )
+        # num_selected_joints = 3
+        # selected_joints = selected_joints[np.random.choice(
+        #     len(selected_joints), 
+        #     num_selected_joints, 
+        #     replace=False
+        # )]
+        selected_joints = selected_joints[:8]
+        print("Selected joints: {}".format(selected_joints))
+        
+        if len(selected_joints) < 2:
+            return None, None
+
+        center = selected_joints.mean(axis=0)[:2]
+
+        left_top = np.amin(selected_joints, axis=0)
+
+        right_bottom = np.amax(selected_joints, axis=0)
+
+        w = right_bottom[0] - left_top[0]
+        h = right_bottom[1] - left_top[1]
+
+        print("new bbox", left_top, right_bottom)
+
+        aspect_ratio = cfg['image_size'][0] / cfg['image_size'][1]
+
+        if w > aspect_ratio * h:
+            h = w * 1.0 / aspect_ratio
+        elif w < aspect_ratio * h:
+            w = h * aspect_ratio
+
+        scale = np.array([w / 200.0, h / 200.0], dtype=np.float32)
+        scale = scale * 1.1
+        return center, scale
+    
+
+    def __call__(self, results):
+        """Perform data augmentation with random crop."""
+        
+        print("Random Crop called!")
+        joints_3d = results['joints_3d']
+        joints_3d_visible = results['joints_3d_visible']
+        rand_num = np.random.rand()
+        rand_num = 0.0
+
+        if (np.sum(joints_3d_visible[:, 0]) > self.min_joints_crop
+                and rand_num < self.prob_random_crop):
+
+            print("Center: {}\nScale: {}".format(results['center'], results['scale']))
+            c_crop, s_crop = self.random_crop(
+                results['ann_info'], joints_3d, joints_3d_visible, self.min_joints_crop)
+            print("New Center: {}\nNew Scale: {}".format(c_crop, s_crop))
+
+            if c_crop is not None and s_crop is not None:
+                results['center'] = c_crop
+                results['scale'] = s_crop
+
+        # # If joints are cropped, change the visibility accordingly
+        # joints_3d = results['joints_3d']
+        # joints_3d_visible = results['joints_3d_visible']
+        # c = results['center']
+        # s = results['scale']
+
 
         return results
 
@@ -592,11 +695,15 @@ class TopDownGenerateTarget:
             size = 2 * tmp_size + 1
             x = np.arange(0, size, 1, np.float32)
             y = x[:, None]
+            out_mu = []
+
 
             for joint_id in range(num_joints):
                 feat_stride = (image_size - 1.0) / (heatmap_size - 1.0)
+                # print("feat_stride", feat_stride)
                 mu_x = int(joints_3d[joint_id][0] / feat_stride[0] + 0.5)
                 mu_y = int(joints_3d[joint_id][1] / feat_stride[1] + 0.5)
+                out_mu.append([mu_x, mu_y])
                 # Check that any part of the gaussian is in-bounds
                 ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
                 br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
@@ -625,6 +732,9 @@ class TopDownGenerateTarget:
                 if v > 0.5:
                     target[joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
                         g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
+            print("Out of image MUs:")
+            for m in out_mu:
+                print(m)
 
         elif target_type.lower() == 'CombinedTarget'.lower():
             target = np.zeros(
@@ -665,7 +775,10 @@ class TopDownGenerateTarget:
             strip_size = (heatmap_size - fin_heatmap_size) / 2
             fin_stride = (image_size - 1.0) / (fin_heatmap_size - 1.0)
 
+            print("fin_stride", fin_stride)
+
             out_mu = []
+            out_mu_acc = []
 
             for joint_id in range(num_joints):
                 kpt_vis = int(joints_3d_visible[joint_id, 0])
@@ -677,16 +790,19 @@ class TopDownGenerateTarget:
                 out_of_image = False
                 coef = np.log(9)
                 mu = [None, None]
+                print("image_size", image_size)
                 for i in [0, 1]:
                     kp = joints_3d[joint_id, i]
                     if kp < 0:
                         kp_norm = kp / image_size[i]
                         mu[i] = 1 / (1 + np.exp(-kp_norm*coef)) * 2 * strip_size[i]
+                        print("kp < 0")
+                        print(kp, kp_norm, mu[i])
                         out_of_image = True
                     elif kp > image_size[i]:
                         kp_norm = (kp - image_size[i]) / image_size[i]
                         sigmoid = (1 / (1 + np.exp(-kp_norm * coef)))
-                        mu[i] = strip_size[i] + fin_heatmap_size[i] + (sigmoid - 0.5) * strip_size[i] 
+                        mu[i] = strip_size[i] + fin_heatmap_size[i] + (sigmoid - 0.5)*2 * strip_size[i] 
                         out_of_image = True
                     else:
                         mu[i] = strip_size[i] + (kp / fin_stride[i])
@@ -725,6 +841,8 @@ class TopDownGenerateTarget:
                 # Generate gaussian
                 mu_x_ac = mu_x
                 mu_y_ac = mu_y
+                mu_x = int(mu_x + 0.5)
+                mu_y = int(mu_y + 0.5)
                 x0 = y0 = size // 2
                 x0 += mu_x_ac - mu_x
                 y0 += mu_y_ac - mu_y
@@ -750,6 +868,9 @@ class TopDownGenerateTarget:
             print("Out of image MUs:")
             for m in out_mu:
                 print(m)
+            print("Out of image MUs (without strip):")
+            for m in out_mu:
+                print(m - strip_size)
 
         else:
             raise ValueError('target_type should be either '

@@ -185,7 +185,7 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
 
         accuracy = dict()
 
-        if self.target_type == 'GaussianHeatmap':
+        if (self.target_type == 'GaussianHeatmap' or self.target_type == 'ProbabilityHeatmap'):
             _, avg_acc, _ = pose_pck_accuracy(
                 output.detach().cpu().numpy(),
                 target.detach().cpu().numpy(),

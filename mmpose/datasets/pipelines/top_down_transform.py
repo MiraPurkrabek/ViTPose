@@ -271,12 +271,15 @@ class TopDownRandomCrop:
     def __init__(self, min_joints_crop=5, prob_random_crop=0.8):
         self.min_joints_crop = min_joints_crop
         self.prob_random_crop = prob_random_crop
+        self.cut_at_least_joints = 3    # Cut at least 3 joints
         
 
     @staticmethod
-    def random_crop(cfg, joints_3d, joints_3d_visible, min_joints_crop=3):
+    def random_crop(cfg, joints_3d, joints_3d_visible, min_joints_crop=3, cut_at_least_joints=3):
         """Get center&scale for random crop."""
         
+        # Weight joints. The higher the weight, the more probable the joint is
+        # to be cropped.
         weights = np.array([
             2,      # Nose
             2, 2,   # LREye
@@ -301,9 +304,14 @@ class TopDownRandomCrop:
         selected_weights = selected_weights / np.sum(selected_weights)
         
         # Randomly choose subset of joints
+        if len(selected_joints)-cut_at_least_joints < min_joints_crop:
+            return None, None
+        
+        # print(len(selected_joints), len(selected_joints)-3, min_joints_crop)
+
         num_selected_joints = np.random.randint(
             min_joints_crop, 
-            len(selected_joints)-3
+            len(selected_joints)-(cut_at_least_joints-1)
         )
         selected_joints = selected_joints[np.random.choice(
             len(selected_joints), 
@@ -312,13 +320,11 @@ class TopDownRandomCrop:
             p = selected_weights,
         )]
         
-        if len(selected_joints) < 2:
-            return None, None
+        # if len(selected_joints) < 2:
+        #     return None, None
 
         center = selected_joints.mean(axis=0)[:2]
-
         left_top = np.amin(selected_joints, axis=0)
-
         right_bottom = np.amax(selected_joints, axis=0)
 
         w = right_bottom[0] - left_top[0]
@@ -344,22 +350,15 @@ class TopDownRandomCrop:
         rand_num = np.random.rand()
         # rand_num = 0.0
 
-        if (np.sum(joints_3d_visible[:, 0]) > self.min_joints_crop
+        if (np.sum(joints_3d_visible[:, 0]) > self.min_joints_crop+self.cut_at_least_joints
                 and rand_num < self.prob_random_crop):
 
             c_crop, s_crop = self.random_crop(
-                results['ann_info'], joints_3d, joints_3d_visible, self.min_joints_crop)
+                results['ann_info'], joints_3d, joints_3d_visible, self.min_joints_crop, self.cut_at_least_joints)
 
             if c_crop is not None and s_crop is not None:
                 results['center'] = c_crop
                 results['scale'] = s_crop
-
-        # # If joints are cropped, change the visibility accordingly
-        # joints_3d = results['joints_3d']
-        # joints_3d_visible = results['joints_3d_visible']
-        # c = results['center']
-        # s = results['scale']
-
 
         return results
 

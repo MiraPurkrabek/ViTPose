@@ -1,25 +1,13 @@
 COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_TOP/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_seq_test/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_test/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_val/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/COCO-like/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/tiny/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/RePoGen/sampled_poses/ViTPose_finetune_HN_5kBOTTOM/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_TB_benchmark/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_bbox/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/WEPDTOF-Pose/full_COCO-like/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
 
 VAL_COCO_ROOT = COCO_ROOT
-BATCH_SIZE = 1
+BATCH_SIZE = 64
     
 _base_ = [
     '../../../../_base_/default_runtime.py',
     '../../../../_base_/datasets/coco.py'
 ]
-evaluation = dict(interval=10, metric='mAP', save_best='AP')
+evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
 optimizer = dict(type='AdamW', lr=5e-4, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
@@ -43,10 +31,9 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=0.001,
-    step=[170, 200])
-total_epochs = 210
-# target_type = 'GaussianHeatmap'
-target_type = 'ProbabilityHeatmap'
+    step=[20])
+total_epochs = 21
+target_type = 'GaussianHeatmap'
 channel_cfg = dict(
     num_output_channels=17,
     dataset_joints=17,
@@ -94,7 +81,7 @@ model = dict(
 
 data_cfg = dict(
     image_size=[192, 256],
-    heatmap_size=[48*1, 64*1],
+    heatmap_size=[48, 64],
     num_output_channels=channel_cfg['num_output_channels'],
     num_joints=channel_cfg['dataset_joints'],
     dataset_channel=channel_cfg['dataset_channel'],
@@ -105,39 +92,20 @@ data_cfg = dict(
     vis_thr=0.2,
     use_gt_bbox=False,
     det_bbox_thr=0.0,
-
-    # bbox_file=VAL_COCO_ROOT + "/annotations/ConvNext.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/deDETR.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/DetectoRS.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/HTC.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/Mask2Former.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/RFNext.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/YOLOX-x.json",
-
-    # bbox_file=VAL_COCO_ROOT + "/detections/coDETR.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/ConvNext.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/deDETR.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/DetectoRS.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/HTC.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/Mask2Former.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/RFNext.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/YOLOX-x.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/YOLOX-x_nms_070.json",
     
     bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
 )
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.00),
-    # dict(type='TopDownRandomFlip', flip_prob=0.5),
-    # dict(
-    #     type='TopDownHalfBodyTransform',
-    #     num_joints_half_body=8,
-    #     prob_half_body=0.3),
+    dict(type='TopDownGetBboxCenterScale', padding=1.25),
+    dict(type='TopDownRandomFlip', flip_prob=0.5),
     dict(
-        type='TopDownGetRandomScaleRotation', rot_factor=30, scale_factor=0.2),
-    dict(type='TopDownRandomCrop', min_joints_crop=3, prob_random_crop=0.8),
+        type='TopDownHalfBodyTransform',
+        num_joints_half_body=8,
+        prob_half_body=0.3),
+    dict(
+        type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.5),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(
@@ -146,15 +114,12 @@ train_pipeline = [
         std=[0.229, 0.224, 0.225]),
     dict(
         type='TopDownGenerateTarget',
-        sigma=2.0,
+        sigma=2,
         encoding='UDP',
-        target_type=target_type,
-        inf_strip_size=0.1),
+        target_type=target_type),
     dict(
         type='Collect',
-        keys=['img', 'target', 'target_weight',
-              'joints_3d', 'joints_3d_visible', 'image_file', 'center', 'scale', 'ann_info' # Comment for training, used for test_probability_heatmap.py
-            ],
+        keys=['img', 'target', 'target_weight'],
         meta_keys=[
             'image_file', 'joints_3d', 'joints_3d_visible', 'center', 'scale',
             'rotation', 'bbox_score', 'flip_pairs'
@@ -163,7 +128,7 @@ train_pipeline = [
 
 val_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.00),
+    dict(type='TopDownGetBboxCenterScale', padding=1.25),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(

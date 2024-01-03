@@ -95,7 +95,7 @@ def test_probability_heatmap(n=10, save_dir="test"):
 if __name__ == "__main__":
     n = N
     
-    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/out_of_image_heatmap/coco/ViTPose_small_coco_256x192.py")
+    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/out_of_image_heatmap/coco/OOI_ViTPose_small_coco_256x192.py")
     dataset = build_dataset(cfg.data.train)
     input_data = dataset[np.random.randint(0, len(dataset))]
     

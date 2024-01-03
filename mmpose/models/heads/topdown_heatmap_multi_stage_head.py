@@ -165,7 +165,10 @@ class TopdownHeatmapMultiStageHead(TopdownHeatmapBaseHead):
 
         accuracy = dict()
 
-        if self.target_type == 'GaussianHeatmap':
+        if (
+            self.target_type == 'GaussianHeatmap' or
+            self.target_type == 'ProbabilityHeatmap'):
+
             _, avg_acc, _ = pose_pck_accuracy(
                 output[-1].detach().cpu().numpy(),
                 target.detach().cpu().numpy(),
@@ -503,7 +506,7 @@ class TopdownHeatmapMSMUHead(TopdownHeatmapBaseHead):
 
         accuracy = dict()
 
-        if self.target_type == 'GaussianHeatmap':
+        if (self.target_type == 'GaussianHeatmap' or self.target_type == 'ProbabilityHeatmap'):
             assert isinstance(output, list)
             assert target.dim() == 5 and target_weight.dim() == 4
             _, avg_acc, _ = pose_pck_accuracy(

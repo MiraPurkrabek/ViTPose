@@ -390,6 +390,7 @@ class TopDownGenerateTarget:
             (response map) and regression target (offset map).
             Paper ref: Huang et al. The Devil is in the Details: Delving into
             Unbiased Data Processing for Human Pose Estimation (CVPR 2020).
+        valid_visibilities (list[int]): Admissible visibility levels.
     """
 
     def __init__(self,
@@ -398,13 +399,15 @@ class TopDownGenerateTarget:
                  valid_radius_factor=0.0546875,
                  target_type='GaussianHeatmap',
                  encoding='MSRA',
-                 unbiased_encoding=False):
+                 unbiased_encoding=False,
+                 valid_visibilities=[1, 2]):
         self.sigma = sigma
         self.unbiased_encoding = unbiased_encoding
         self.kernel = kernel
         self.valid_radius_factor = valid_radius_factor
         self.target_type = target_type
         self.encoding = encoding
+        self.valid_visibilities = valid_visibilities
 
     def _msra_generate_target(self, cfg, joints_3d, joints_3d_visible, sigma):
         """Generate the target heatmap via "MSRA" approach.
@@ -539,7 +542,7 @@ class TopDownGenerateTarget:
         return heatmaps, target_weight
 
     def _udp_generate_target(self, cfg, joints_3d, joints_3d_visible, factor,
-                             target_type):
+                             target_type, valid_visibilities=[1, 2]):
         """Generate the target heatmap via 'UDP' approach. Paper ref: Huang et
         al. The Devil is in the Details: Delving into Unbiased Data Processing
         for Human Pose Estimation (CVPR 2020).
@@ -562,6 +565,7 @@ class TopDownGenerateTarget:
                 GaussianHeatmap: Heatmap target with gaussian distribution.
                 CombinedTarget: The combination of classification target
                 (response map) and regression target (offset map).
+            valid_visibilities (list[int]): Admissible visibility levels.
 
         Returns:
             tuple: A tuple containing targets.
@@ -576,7 +580,7 @@ class TopDownGenerateTarget:
         use_different_joint_weights = cfg['use_different_joint_weights']
 
         target_weight = np.ones((num_joints, 1), dtype=np.float32)
-        target_weight[:, 0] = joints_3d_visible[:, 0]
+        target_weight[:, 0] = np.minimum(1, joints_3d_visible[:, 0])
 
         if target_type.lower() == 'GaussianHeatmap'.lower():
             target = np.zeros((num_joints, heatmap_size[1], heatmap_size[0]),
@@ -590,9 +594,17 @@ class TopDownGenerateTarget:
             y = x[:, None]
 
             for joint_id in range(num_joints):
+                # Check that the keypoint visibility is valid
+                vis = joints_3d_visible[joint_id, 0]
+                if vis not in valid_visibilities:
+                    # If not, just return the image as is
+                    target_weight[joint_id] = 0
+                    continue
+
                 feat_stride = (image_size - 1.0) / (heatmap_size - 1.0)
                 mu_x = int(joints_3d[joint_id][0] / feat_stride[0] + 0.5)
                 mu_y = int(joints_3d[joint_id][1] / feat_stride[1] + 0.5)
+                
                 # Check that any part of the gaussian is in-bounds
                 ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
                 br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
@@ -731,14 +743,14 @@ class TopDownGenerateTarget:
                 for i in range(num_factors):
                     target_i, target_weight_i = self._udp_generate_target(
                         cfg, joints_3d, joints_3d_visible, factors[i],
-                        self.target_type)
+                        self.target_type, self.valid_visibilities)
                     target = np.concatenate([target, target_i[None]], axis=0)
                     target_weight = np.concatenate(
                         [target_weight, target_weight_i[None]], axis=0)
             else:
                 target, target_weight = self._udp_generate_target(
                     results['ann_info'], joints_3d, joints_3d_visible, factors,
-                    self.target_type)
+                    self.target_type, self.valid_visibilities)
         else:
             raise ValueError(
                 f'Encoding approach {self.encoding} is not supported!')

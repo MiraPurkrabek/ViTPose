@@ -1,33 +1,22 @@
 COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_TOP/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_seq_test/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_test/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_val/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/COCO-like/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/tiny/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/RePoGen/sampled_poses/ViTPose_finetune_HN_5kBOTTOM/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_TB_benchmark/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_bbox/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/WEPDTOF-Pose/full_COCO-like/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
+
 
 VAL_COCO_ROOT = COCO_ROOT
 BATCH_SIZE = 64
 
-load_from = "models/pretrained/mae_pretrain_vit_small.pth"
-    
+prtr = "models/pretrained/mae_pretrain_vit_small.pth"
+
 _base_ = [
-    '../../../../_base_/default_runtime.py',
-    '../../../../_base_/datasets/coco.py'
+    '../../../../../_base_/default_runtime.py',
+    '../../../../../_base_/datasets/coco.py'
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=5e-4, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=5e-5, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=12, 
-                                    layer_decay_rate=0.8,
+                                    layer_decay_rate=0.9,
                                     custom_keys={
                                             'bias': dict(decay_multi=0.),
                                             'pos_embed': dict(decay_mult=0.),
@@ -69,7 +58,7 @@ channel_cfg = dict(
 # model settings
 model = dict(
     type='TopDown',
-    pretrained=None,
+    pretrained=prtr,
     backbone=dict(
         type='ViT',
         img_size=(256, 192),
@@ -120,7 +109,7 @@ data_cfg = dict(
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.25),
+    dict(type='TopDownGetBboxCenterScale', padding=1.00),
     # dict(type='TopDownRandomFlip', flip_prob=0.5),
     # dict(
     #     type='TopDownHalfBodyTransform',
@@ -140,11 +129,12 @@ train_pipeline = [
         sigma=2.0,
         encoding='UDP',
         target_type=target_type,
-        inf_strip_size=0.0),
+        inf_strip_size=0.0,
+        modulate_sigma_by_visibility=False),
     dict(
         type='Collect',
         keys=['img', 'target', 'target_weight',
-            #   'joints_3d', 'joints_3d_visible', 'image_file', 'center', 'scale', 'ann_info' # Comment for training, used for test_probability_heatmap.py
+              'joints_3d', 'joints_3d_visible', 'image_file', 'center', 'scale', 'ann_info' # Comment for training, used for test_probability_heatmap.py
             ],
         meta_keys=[
             'image_file', 'joints_3d', 'joints_3d_visible', 'center', 'scale',
@@ -154,7 +144,7 @@ train_pipeline = [
 
 val_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.25),
+    dict(type='TopDownGetBboxCenterScale', padding=1.00),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(

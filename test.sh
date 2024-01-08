@@ -1,13 +1,13 @@
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/hrnet_w48_test_384x288.py"
 # WEIGHTS="models/pretrained/hrnet_w48_coco_384x288-314c8528_20200708.pth"
 
-# CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192.py"
-CFG="configs/body/2d_kpt_sview_rgb_img/out_of_image_heatmap/coco/OOI_ViTPose_small_coco_256x192_wo_flip.py"
+CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192.py"
+# CFG="configs/body/2d_kpt_sview_rgb_img/out_of_image_heatmap/coco/OOI_ViTPose_small_coco_256x192_wo_flip.py"
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_base_coco_256x192.py"
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_huge_coco_256x192.py"
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_large_simple_synthetic_256x192.py"
 
-# WEIGHTS="models/pretrained/vitpose-s.pth"
+WEIGHTS="models/pretrained/vitpose-s.pth"
 # WEIGHTS="models/pretrained/vitpose-h.pth"
 # WEIGHTS="models/pretrained/vitpose-b-multi-coco.pth"
 # WEIGHTS="models/pretrained/vitpose-h-multi-coco.pth"

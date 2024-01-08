@@ -33,6 +33,12 @@ lr_config = dict(
     warmup_ratio=0.001,
     step=[20])
 total_epochs = 21
+log_config = dict(
+    interval=1,
+    hooks=[
+        dict(type='TextLoggerHook'),
+        dict(type='TensorboardLoggerHook')
+    ])
 target_type = 'GaussianHeatmap'
 channel_cfg = dict(
     num_output_channels=17,

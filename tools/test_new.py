@@ -298,7 +298,7 @@ def main():
         num_non_nan = (np.isnan(oks_list) == False).sum()
         print("There is {:d} non-NaN OKS scores out of {:d} samples".format(num_non_nan, len(oks_list)))
 
-        draw_all = False
+        draw_all = True
         if draw_all: 
             num_images = len(oks_list)
             indices_to_draw = list(range(num_images))

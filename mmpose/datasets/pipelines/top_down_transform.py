@@ -510,7 +510,8 @@ class TopDownGenerateTarget:
                  target_type='GaussianHeatmap',
                  encoding='MSRA',
                  unbiased_encoding=False,
-                 inf_strip_size=0.1):
+                 inf_strip_size=0.1,
+                 modulate_sigma_by_visibility=True):
         self.sigma = sigma
         self.unbiased_encoding = unbiased_encoding
         self.kernel = kernel
@@ -518,6 +519,7 @@ class TopDownGenerateTarget:
         self.target_type = target_type
         self.encoding = encoding
         self.inf_strip_size = inf_strip_size
+        self.modulate_sigma_by_visibility = modulate_sigma_by_visibility
 
     def _msra_generate_target(self, cfg, joints_3d, joints_3d_visible, sigma):
         """Generate the target heatmap via "MSRA" approach.
@@ -652,7 +654,7 @@ class TopDownGenerateTarget:
         return heatmaps, target_weight
 
     def _udp_generate_target(self, cfg, joints_3d, joints_3d_visible, factor,
-                             target_type, inf_strip_size):
+                             target_type, inf_strip_size, modulate_sigma_by_visibility):
         """Generate the target heatmap via 'UDP' approach. Paper ref: Huang et
         al. The Devil is in the Details: Delving into Unbiased Data Processing
         for Human Pose Estimation (CVPR 2020).
@@ -677,6 +679,8 @@ class TopDownGenerateTarget:
                 (response map) and regression target (offset map).
                 ProbabilityHeatmap: The heatmap enabling out-of-image prediction.
             inf_strip_size (float): Size of the infinity strip for ProbabilityHeatmap.
+            modulate_sigma_by_visibility (bool): If True (default), will choose different
+                sigmas for different visibilities. Works only for ProbabilityHeatmap.
 
         Returns:
             tuple: A tuple containing targets.
@@ -829,6 +833,11 @@ class TopDownGenerateTarget:
                 else:
                     raise ValueError("Unexpected combination of visibility ({}) and out-of-image ({})".format(kpt_vis, out_of_image))
 
+                if not modulate_sigma_by_visibility:
+                    f = factor
+
+                print(joint_id, f)
+
                 # prepare for gaussian
                 tmp_size = f * 3
                 size = 2 * tmp_size + 1
@@ -945,14 +954,14 @@ class TopDownGenerateTarget:
                 for i in range(num_factors):
                     target_i, target_weight_i = self._udp_generate_target(
                         cfg, joints_3d, joints_3d_visible, factors[i],
-                        self.target_type, self.inf_strip_size)
+                        self.target_type, self.inf_strip_size, self.modulate_sigma_by_visibility)
                     target = np.concatenate([target, target_i[None]], axis=0)
                     target_weight = np.concatenate(
                         [target_weight, target_weight_i[None]], axis=0)
             else:
                 target, target_weight = self._udp_generate_target(
                     results['ann_info'], joints_3d, joints_3d_visible, factors,
-                    self.target_type, self.inf_strip_size)
+                    self.target_type, self.inf_strip_size, self.modulate_sigma_by_visibility)
         else:
             raise ValueError(
                 f'Encoding approach {self.encoding} is not supported!')

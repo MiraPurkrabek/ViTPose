@@ -400,7 +400,8 @@ class TopDownGenerateTarget:
                  target_type='GaussianHeatmap',
                  encoding='MSRA',
                  unbiased_encoding=False,
-                 valid_visibilities=[1, 2]):
+                 valid_visibilities=[1, 2],
+                 ignore_zeros=True):
         self.sigma = sigma
         self.unbiased_encoding = unbiased_encoding
         self.kernel = kernel
@@ -408,6 +409,7 @@ class TopDownGenerateTarget:
         self.target_type = target_type
         self.encoding = encoding
         self.valid_visibilities = valid_visibilities
+        self.ignore_zeros = ignore_zeros
 
     def _msra_generate_target(self, cfg, joints_3d, joints_3d_visible, sigma):
         """Generate the target heatmap via "MSRA" approach.
@@ -542,7 +544,7 @@ class TopDownGenerateTarget:
         return heatmaps, target_weight
 
     def _udp_generate_target(self, cfg, joints_3d, joints_3d_visible, factor,
-                             target_type, valid_visibilities=[1, 2]):
+                             target_type, valid_visibilities=[1, 2], ignore_zeros=True):
         """Generate the target heatmap via 'UDP' approach. Paper ref: Huang et
         al. The Devil is in the Details: Delving into Unbiased Data Processing
         for Human Pose Estimation (CVPR 2020).
@@ -580,7 +582,8 @@ class TopDownGenerateTarget:
         use_different_joint_weights = cfg['use_different_joint_weights']
 
         target_weight = np.ones((num_joints, 1), dtype=np.float32)
-        target_weight[:, 0] = np.minimum(1, joints_3d_visible[:, 0])
+        if ignore_zeros:
+            target_weight[:, 0] = np.minimum(1, joints_3d_visible[:, 0])
 
         if target_type.lower() == 'GaussianHeatmap'.lower():
             target = np.zeros((num_joints, heatmap_size[1], heatmap_size[0]),
@@ -594,11 +597,15 @@ class TopDownGenerateTarget:
             y = x[:, None]
 
             for joint_id in range(num_joints):
+                # print(joint_id, joints_3d[joint_id, :], joints_3d_visible[joint_id, :])
+                # print(vis, vis in valid_visibilities, valid_visibilities)
+
                 # Check that the keypoint visibility is valid
                 vis = joints_3d_visible[joint_id, 0]
                 if vis not in valid_visibilities:
                     # If not, just return the image as is
-                    target_weight[joint_id] = 0
+                    if ignore_zeros:
+                        target_weight[joint_id] = 0
                     continue
 
                 feat_stride = (image_size - 1.0) / (heatmap_size - 1.0)
@@ -611,7 +618,8 @@ class TopDownGenerateTarget:
                 if ul[0] >= heatmap_size[0] or ul[1] >= heatmap_size[1] \
                         or br[0] < 0 or br[1] < 0:
                     # If not, just return the image as is
-                    target_weight[joint_id] = 0
+                    if ignore_zeros:
+                        target_weight[joint_id] = 0
                     continue
 
                 # # Generate gaussian
@@ -629,7 +637,8 @@ class TopDownGenerateTarget:
                 img_x = max(0, ul[0]), min(br[0], heatmap_size[0])
                 img_y = max(0, ul[1]), min(br[1], heatmap_size[1])
 
-                v = target_weight[joint_id]
+                v = vis
+                # v = target_weight[joint_id]
                 if v > 0.5:
                     target[joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
                         g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
@@ -743,14 +752,14 @@ class TopDownGenerateTarget:
                 for i in range(num_factors):
                     target_i, target_weight_i = self._udp_generate_target(
                         cfg, joints_3d, joints_3d_visible, factors[i],
-                        self.target_type, self.valid_visibilities)
+                        self.target_type, self.valid_visibilities, self.ignore_zeros)
                     target = np.concatenate([target, target_i[None]], axis=0)
                     target_weight = np.concatenate(
                         [target_weight, target_weight_i[None]], axis=0)
             else:
                 target, target_weight = self._udp_generate_target(
                     results['ann_info'], joints_3d, joints_3d_visible, factors,
-                    self.target_type, self.valid_visibilities)
+                    self.target_type, self.valid_visibilities, self.ignore_zeros)
         else:
             raise ValueError(
                 f'Encoding approach {self.encoding} is not supported!')

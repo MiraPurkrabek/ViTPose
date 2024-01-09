@@ -1,15 +1,17 @@
 # COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_TOP/"
-COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
+# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_seq_test/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_test/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_val/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/COCO-like/"
+COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/COCO-like/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/tiny/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/RePoGen/sampled_poses/ViTPose_finetune_HN_5kBOTTOM/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_TB_benchmark/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_bbox/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/WEPDTOF-Pose/full_COCO-like/"
+# COCO_ROOT = "/datagrid/personal/purkrmir/data/CrowdedPose/COCO-like/"
+
 
 VAL_COCO_ROOT = COCO_ROOT
 BATCH_SIZE = 64

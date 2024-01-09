@@ -1,29 +1,22 @@
 COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/tiny/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/COCO-like/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_test/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/TOP_val/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/Infants/Infants_benchmark/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_TB_benchmark/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_bbox/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/CrowdPose/COCO-like/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/WEPDTOF-Pose/COCO-like/"
-# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
 
 VAL_COCO_ROOT = COCO_ROOT
 BATCH_SIZE = 64
+PADDING = 1.25
 
+prtr = "models/pretrained/mae_pretrain_vit_small.pth"
+    
 _base_ = [
     '../../../../_base_/default_runtime.py',
     '../../../../_base_/datasets/coco.py'
 ]
-evaluation = dict(interval=10, metric='mAP', save_best='AP')
+evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
 optimizer = dict(type='AdamW', lr=5e-4, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
-                                    num_layers=32, 
-                                    layer_decay_rate=0.85,
+                                    num_layers=12, 
+                                    layer_decay_rate=0.9,
                                     custom_keys={
                                             'bias': dict(decay_multi=0.),
                                             'pos_embed': dict(decay_mult=0.),
@@ -43,6 +36,12 @@ lr_config = dict(
     warmup_ratio=0.001,
     step=[170, 200])
 total_epochs = 210
+log_config = dict(
+    interval=1,
+    hooks=[
+        dict(type='TextLoggerHook'),
+        dict(type='TensorboardLoggerHook')
+    ])
 target_type = 'GaussianHeatmap'
 channel_cfg = dict(
     num_output_channels=17,
@@ -57,23 +56,23 @@ channel_cfg = dict(
 # model settings
 model = dict(
     type='TopDown',
-    pretrained=None,
+    pretrained=prtr,
     backbone=dict(
         type='ViT',
         img_size=(256, 192),
         patch_size=16,
-        embed_dim=1280,
-        depth=32,
-        num_heads=16,
+        embed_dim=384,
+        depth=12,
+        num_heads=12,
         ratio=1,
         use_checkpoint=False,
         mlp_ratio=4,
         qkv_bias=True,
-        drop_path_rate=0.55,
+        drop_path_rate=0.1,
     ),
     keypoint_head=dict(
         type='TopdownHeatmapSimpleHead',
-        in_channels=1280,
+        in_channels=384,
         num_deconv_layers=2,
         num_deconv_filters=(256, 256),
         num_deconv_kernels=(4, 4),
@@ -102,39 +101,13 @@ data_cfg = dict(
     vis_thr=0.2,
     use_gt_bbox=False,
     det_bbox_thr=0.0,
-
-    # bbox_file=VAL_COCO_ROOT + "/annotations/ConvNext.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/deDETR.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/DetectoRS.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/HTC.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/Mask2Former.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/RFNext.json",
-    # bbox_file=VAL_COCO_ROOT + "/annotations/YOLOX-x.json",
-
-    # bbox_file=VAL_COCO_ROOT + "/detections/coDETR.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/ConvNext.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/deDETR.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/DetectoRS.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/HTC.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/Mask2Former.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/RFNext.json",
-    # bbox_file=VAL_COCO_ROOT + "/detections/YOLOX-x.json",
-
-    # bbox_file=VAL_COCO_ROOT + "/detections/Mask2Former_nms_095.json",
     
     bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
-    
-    # bbox_file=VAL_COCO_ROOT + "/detections/YOLOX-x.json",
-
-    # bbox_file=VAL_COCO_ROOT + "/detections/YOLOX-x_CrowdedCOCO.json",
-
-    # bbox_file='data/coco/person_detection_results/'
-    # 'COCO_val2017_detections_AP_H_56_person.json',
 )
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.25),
+    dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownRandomFlip', flip_prob=0.5),
     dict(
         type='TopDownHalfBodyTransform',
@@ -152,7 +125,8 @@ train_pipeline = [
         type='TopDownGenerateTarget',
         sigma=2,
         encoding='UDP',
-        target_type=target_type),
+        target_type=target_type,
+        valid_visibilities=[1,2]),
     dict(
         type='Collect',
         keys=['img', 'target', 'target_weight'],
@@ -164,7 +138,7 @@ train_pipeline = [
 
 val_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.25),
+    dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(
@@ -190,22 +164,28 @@ data = dict(
     test_dataloader=dict(samples_per_gpu=BATCH_SIZE),
     train=dict(
         type='TopDownCocoDataset',
+        # ann_file=f'{data_root}/ochuman_coco.json',
         ann_file=f'{data_root}/annotations/person_keypoints_train2017.json',
+        # img_prefix=f'{VAL_COCO_ROOT}/images/',
         img_prefix=f'{data_root}/train2017/',
         data_cfg=data_cfg,
         pipeline=train_pipeline,
         dataset_info={{_base_.dataset_info}}),
     val=dict(
         type='TopDownCocoDataset',
-        ann_file=f'{data_root}/annotations/person_keypoints_val2017.json',
-        img_prefix=f'{data_root}/val2017/',
+        # ann_file=f'{data_root}/ochuman_coco.json',
+        ann_file=f'{VAL_COCO_ROOT}/annotations/person_keypoints_val2017.json',
+        # img_prefix=f'{VAL_COCO_ROOT}/images/',
+        img_prefix=f'{VAL_COCO_ROOT}/val2017/',
         data_cfg=data_cfg,
         pipeline=val_pipeline,
         dataset_info={{_base_.dataset_info}}),
     test=dict(
         type='TopDownCocoDataset',
-        ann_file=f'{data_root}/annotations/person_keypoints_val2017.json',
-        img_prefix=f'{data_root}/val2017/',
+        # ann_file=f'{data_root}/ochuman_coco.json',
+        ann_file=f'{VAL_COCO_ROOT}/annotations/person_keypoints_val2017.json',
+        # img_prefix=f'{VAL_COCO_ROOT}/images/',
+        img_prefix=f'{VAL_COCO_ROOT}/val2017/',
         data_cfg=data_cfg,
         pipeline=test_pipeline,
         dataset_info={{_base_.dataset_info}}),

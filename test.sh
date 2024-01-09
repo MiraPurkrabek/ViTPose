@@ -7,9 +7,11 @@ CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_huge_coco_25
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_large_simple_synthetic_256x192.py"
 
 # WEIGHTS="models/pretrained/vitpose-s.pth"
-# WEIGHTS="models/pretrained/vitpose-h.pth"
+WEIGHTS="models/pretrained/vitpose-h.pth"
 # WEIGHTS="models/pretrained/vitpose-b-multi-coco.pth"
 # WEIGHTS="models/pretrained/vitpose-h-multi-coco.pth"
+
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_vis2_only/best_AP_epoch_206.pth"
 
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTOM_rotated_256x192/best_AP_epoch_17.pth"
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTOM_rotated_256x192_lr5e5/best_AP_epoch_17.pth"
@@ -17,7 +19,7 @@ CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_huge_coco_25
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTTOM_rotated_256x192/best_AP_epoch_35.pth"
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTTOM_rotated_256x192/best_epoch_60.pth"
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTTOM_rotated_vol2_256x192/best_AP_epoch_56.pth"
-WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTTOM_rotated_vol3_256x192/best_AP_epoch_47.pth"
+# WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTTOM_rotated_vol3_256x192/best_AP_epoch_47.pth"
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTTOM_amass_rotated_256x192/best_AP_epoch_64.pth"
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kTOP_rotated_256x192/best_AP_epoch_67.pth"
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kTOP_amass_rotated_256x192/best_AP_epoch_63.pth"
@@ -84,7 +86,7 @@ WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTTOM_rotated_vol3_256x192/bes
 tools/dist_test.sh \
     $CFG \
     $WEIGHTS \
-    4 \
+    2 \
 
     # --gpu-collect \
     

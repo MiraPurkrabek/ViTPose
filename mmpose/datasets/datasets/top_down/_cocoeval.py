@@ -71,7 +71,7 @@ class COCOeval:
     # developed to support multiple pose-related datasets, including COCO,
     # CrowdPose and so on.
 
-    def __init__(self, cocoGt=None, cocoDt=None, iouType='keypoints', sigmas=None, use_area=True):
+    def __init__(self, cocoGt=None, cocoDt=None, iouType='keypoints', sigmas=None, use_area=True, use_visibility=False):
         '''
         Initialize CocoEval using coco APIs for gt and dt
         :param cocoGt: coco object with ground truth annotations
@@ -106,6 +106,7 @@ class COCOeval:
             self.anno_file = cocoGt.anno_file
         self.use_area = use_area
         self.score_key = 'score'
+        self.use_visibility = use_visibility
 
     def _prepare(self):
         '''
@@ -267,6 +268,14 @@ class COCOeval:
         self.ious = {(imgId, catId): computeIoU(imgId, catId) \
                         for imgId in p.imgIds
                         for catId in catIds}
+        
+        if 'keypoints' in p.iouType and self.use_visibility:
+            self.ious_vis1 = {(imgId, catId): self.computeOks(imgId, catId, visibility_condition=lambda x: x == 1) \
+                            for imgId in p.imgIds
+                            for catId in catIds}
+            self.ious_vis2 = {(imgId, catId): self.computeOks(imgId, catId, visibility_condition=lambda x: x == 2) \
+                            for imgId in p.imgIds
+                            for catId in catIds}
 
         # tmp_ious = {(imgId, catId): self.computeOksPerKpt(imgId, catId) \
         #                 for imgId in p.imgIds
@@ -281,6 +290,21 @@ class COCOeval:
                  for areaRng in p.areaRng
                  for imgId in p.imgIds
              ]
+        if 'keypoints' in p.iouType and self.use_visibility:
+            self.evalImgs_vis1 = [evaluateImg(imgId, catId, areaRng, maxDet,
+                                        given_ious=self.ious_vis1)
+                    for catId in catIds
+                    for areaRng in p.areaRng
+                    for imgId in p.imgIds
+                ]
+            self.evalImgs_vis2 = [evaluateImg(imgId, catId, areaRng, maxDet,
+                                        given_ious=self.ious_vis2)
+                    for catId in catIds
+                    for areaRng in p.areaRng
+                    for imgId in p.imgIds
+                ]
+
+
         
         self.matched_pairs = []
         for imgId in p.imgIds:
@@ -335,7 +359,7 @@ class COCOeval:
         ious = maskUtils.iou(d,g,iscrowd)
         return ious
 
-    def computeOks(self, imgId, catId):
+    def computeOks(self, imgId, catId, visibility_condition=lambda x: x > 0):
         p = self.params
         # dimention here should be Nxm
         gts = self._gts[imgId, catId]
@@ -379,7 +403,7 @@ class COCOeval:
                 g = np.array(gt['keypoints'])
 
             xg = g[0::3]; yg = g[1::3]; vg = g[2::3]
-            k1 = np.count_nonzero(vg > 0)
+            k1 = np.count_nonzero(visibility_condition(vg))
             bb = gt['bbox']
             x0 = bb[0] - bb[2]; x1 = bb[0] + bb[2] * 2
             y0 = bb[1] - bb[3]; y1 = bb[1] + bb[3] * 2
@@ -466,7 +490,8 @@ class COCOeval:
                 # print("e after", e)
                 
                 if k1 > 0:
-                    e=e[vg > 0]
+                    e=e[visibility_condition(vg)]
+                    # e=e[vg > 0]
                     # e=e[(vg > 0) & (det_conf > 0.3)]
                 ious[i, j] = np.sum(np.exp(-e)) / e.shape[0]
                 # print("OKS", np.sum(np.exp(-e)) / e.shape[0])
@@ -572,7 +597,7 @@ class COCOeval:
                 # ious[i, j] = np.sum(np.exp(-e)) / e.shape[0]
         return ious
 
-    def evaluateImg(self, imgId, catId, aRng, maxDet, return_matching=False, match_by_bbox=False):
+    def evaluateImg(self, imgId, catId, aRng, maxDet, return_matching=False, match_by_bbox=False, given_ious=None):
         '''
         perform evaluation for single category and image
         :return: dict (single image results)
@@ -609,7 +634,10 @@ class COCOeval:
         dt = [dt[i] for i in dtind[0:maxDet]]
         iscrowd = [int(o['iscrowd']) for o in gt]
         # load computed ious
-        ious = self.ious[imgId, catId][:, gtind] if len(self.ious[imgId, catId]) > 0 else self.ious[imgId, catId]
+        if given_ious is None:
+            ious = self.ious[imgId, catId][:, gtind] if len(self.ious[imgId, catId]) > 0 else self.ious[imgId, catId]
+        else:
+            ious = given_ious[imgId, catId][:, gtind] if len(given_ious[imgId, catId]) > 0 else given_ious[imgId, catId]
 
         T = len(iouThrs)
         G = len(gt)
@@ -700,103 +728,116 @@ class COCOeval:
         # allows input customized parameters
         if p is None:
             p = self.params
-        p.catIds = p.catIds if p.useCats == 1 else [-1]
-        T           = len(p.iouThrs)
-        R           = len(p.recThrs)
-        K           = len(p.catIds) if p.useCats else 1
-        A           = len(p.areaRng)
-        M           = len(p.maxDets)
-        precision   = -np.ones((T,R,K,A,M)) # -1 for the precision of absent categories
-        recall      = -np.ones((T,K,A,M))
-        scores      = -np.ones((T,R,K,A,M))
+        
+        eval_imgs = [self.evalImgs]
+        eval_labels = ['default']
+        if 'keypoints' in p.iouType and self.use_visibility:
+            eval_labels.append('vis1')
+            eval_imgs.append(self.evalImgs_vis1)
+            eval_labels.append('vis2')
+            eval_imgs.append(self.evalImgs_vis2)
 
-        # create dictionary for future indexing
-        _pe = self._paramsEval
-        catIds = _pe.catIds if _pe.useCats else [-1]
-        setK = set(catIds)
-        setA = set(map(tuple, _pe.areaRng))
-        setM = set(_pe.maxDets)
-        setI = set(_pe.imgIds)
-        # get inds to evaluate
-        k_list = [n for n, k in enumerate(p.catIds)  if k in setK]
-        m_list = [m for n, m in enumerate(p.maxDets) if m in setM]
-        a_list = [n for n, a in enumerate(map(lambda x: tuple(x), p.areaRng)) if a in setA]
-        i_list = [n for n, i in enumerate(p.imgIds)  if i in setI]
-        I0 = len(_pe.imgIds)
-        A0 = len(_pe.areaRng)
-        # retrieve E at each category, area range, and max number of detections
-        counter = 0
-        for k, k0 in enumerate(k_list):
-            Nk = k0*A0*I0
-            for a, a0 in enumerate(a_list):
-                Na = a0*I0
-                for m, maxDet in enumerate(m_list):
-                    E = [self.evalImgs[Nk + Na + i] for i in i_list]
-                    E = [e for e in E if not e is None]
-                    if len(E) == 0:
-                        continue
-                    # print(counter, Nk, Na, maxDet)
-                    counter += 1
+        self.evals = []
+        for eval_img, eval_label in zip(eval_imgs, eval_labels):
+            p.catIds = p.catIds if p.useCats == 1 else [-1]
+            T           = len(p.iouThrs)
+            R           = len(p.recThrs)
+            K           = len(p.catIds) if p.useCats else 1
+            A           = len(p.areaRng)
+            M           = len(p.maxDets)
+            precision   = -np.ones((T,R,K,A,M)) # -1 for the precision of absent categories
+            recall      = -np.ones((T,K,A,M))
+            scores      = -np.ones((T,R,K,A,M))
 
-                    dtScores = np.concatenate([e['dtScores'][0:maxDet] for e in E])
-                    # different sorting method generates slightly different results.
-                    # mergesort is used to be consistent as Matlab implementation.
-                    inds = np.argsort(-dtScores, kind='mergesort')
-                    dtScoresSorted = dtScores[inds]
+            # create dictionary for future indexing
+            _pe = self._paramsEval
+            catIds = _pe.catIds if _pe.useCats else [-1]
+            setK = set(catIds)
+            setA = set(map(tuple, _pe.areaRng))
+            setM = set(_pe.maxDets)
+            setI = set(_pe.imgIds)
+            # get inds to evaluate
+            k_list = [n for n, k in enumerate(p.catIds)  if k in setK]
+            m_list = [m for n, m in enumerate(p.maxDets) if m in setM]
+            a_list = [n for n, a in enumerate(map(lambda x: tuple(x), p.areaRng)) if a in setA]
+            i_list = [n for n, i in enumerate(p.imgIds)  if i in setI]
+            I0 = len(_pe.imgIds)
+            A0 = len(_pe.areaRng)
+            # retrieve E at each category, area range, and max number of detections
+            counter = 0
+            
+            for k, k0 in enumerate(k_list):
+                Nk = k0*A0*I0
+                for a, a0 in enumerate(a_list):
+                    Na = a0*I0
+                    for m, maxDet in enumerate(m_list):
+                        E = [eval_img[Nk + Na + i] for i in i_list]
+                        E = [e for e in E if not e is None]
+                        if len(E) == 0:
+                            continue
+                        # print(counter, Nk, Na, maxDet)
+                        counter += 1
 
-                    dtm  = np.concatenate([e['dtMatches'][:,0:maxDet] for e in E], axis=1)[:,inds]
-                    dtIg = np.concatenate([e['dtIgnore'][:,0:maxDet]  for e in E], axis=1)[:,inds]
-                    gtIg = np.concatenate([e['gtIgnore'] for e in E])
-                    npig = np.count_nonzero(gtIg == 0)
-                    if npig == 0:
-                        continue
-                    # https://github.com/cocodataset/cocoapi/pull/332/
-                    tps = np.logical_and(dtm >= 0, np.logical_not(dtIg))
-                    fps = np.logical_and(dtm < 0, np.logical_not(dtIg))
-                    tp_sum = np.cumsum(tps, axis=1).astype(dtype=np.float64)
-                    fp_sum = np.cumsum(fps, axis=1).astype(dtype=np.float64)
-                    # print(tps.shape, fps.shape, tp_sum.shape, fp_sum.shape)
-                    for t, (tp, fp) in enumerate(zip(tp_sum, fp_sum)):
-                        tp = np.array(tp)
-                        fp = np.array(fp)
-                        nd = len(tp)
-                        rc = tp / npig
-                        pr = tp / (fp+tp+np.spacing(1))
-                        # print(nd, pr)
-                        # print(pr, rc)
-                        q  = np.zeros((R,))
-                        ss = np.zeros((R,))
+                        dtScores = np.concatenate([e['dtScores'][0:maxDet] for e in E])
+                        # different sorting method generates slightly different results.
+                        # mergesort is used to be consistent as Matlab implementation.
+                        inds = np.argsort(-dtScores, kind='mergesort')
+                        dtScoresSorted = dtScores[inds]
 
-                        if nd:
-                            recall[t,k,a,m] = rc[-1]
-                        else:
-                            recall[t,k,a,m] = 0
+                        dtm  = np.concatenate([e['dtMatches'][:,0:maxDet] for e in E], axis=1)[:,inds]
+                        dtIg = np.concatenate([e['dtIgnore'][:,0:maxDet]  for e in E], axis=1)[:,inds]
+                        gtIg = np.concatenate([e['gtIgnore'] for e in E])
+                        npig = np.count_nonzero(gtIg == 0)
+                        if npig == 0:
+                            continue
+                        # https://github.com/cocodataset/cocoapi/pull/332/
+                        tps = np.logical_and(dtm >= 0, np.logical_not(dtIg))
+                        fps = np.logical_and(dtm < 0, np.logical_not(dtIg))
+                        tp_sum = np.cumsum(tps, axis=1).astype(dtype=np.float64)
+                        fp_sum = np.cumsum(fps, axis=1).astype(dtype=np.float64)
+                        # print(tps.shape, fps.shape, tp_sum.shape, fp_sum.shape)
+                        for t, (tp, fp) in enumerate(zip(tp_sum, fp_sum)):
+                            tp = np.array(tp)
+                            fp = np.array(fp)
+                            nd = len(tp)
+                            rc = tp / npig
+                            pr = tp / (fp+tp+np.spacing(1))
+                            # print(nd, pr)
+                            # print(pr, rc)
+                            q  = np.zeros((R,))
+                            ss = np.zeros((R,))
 
-                        # numpy is slow without cython optimization for accessing elements
-                        # use python array gets significant speed improvement
-                        pr = pr.tolist(); q = q.tolist()
+                            if nd:
+                                recall[t,k,a,m] = rc[-1]
+                            else:
+                                recall[t,k,a,m] = 0
 
-                        for i in range(nd-1, 0, -1):
-                            if pr[i] > pr[i-1]:
-                                pr[i-1] = pr[i]
+                            # numpy is slow without cython optimization for accessing elements
+                            # use python array gets significant speed improvement
+                            pr = pr.tolist(); q = q.tolist()
 
-                        inds = np.searchsorted(rc, p.recThrs, side='left')
-                        try:
-                            for ri, pi in enumerate(inds):
-                                q[ri] = pr[pi]
-                                ss[ri] = dtScoresSorted[pi]
-                        except:
-                            pass
-                        precision[t,:,k,a,m] = np.array(q)
-                        scores[t,:,k,a,m] = np.array(ss)
-        self.eval = {
-            'params': p,
-            'counts': [T, R, K, A, M],
-            'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'precision': precision,
-            'recall':   recall,
-            'scores': scores,
-        }
+                            for i in range(nd-1, 0, -1):
+                                if pr[i] > pr[i-1]:
+                                    pr[i-1] = pr[i]
+
+                            inds = np.searchsorted(rc, p.recThrs, side='left')
+                            try:
+                                for ri, pi in enumerate(inds):
+                                    q[ri] = pr[pi]
+                                    ss[ri] = dtScoresSorted[pi]
+                            except:
+                                pass
+                            precision[t,:,k,a,m] = np.array(q)
+                            scores[t,:,k,a,m] = np.array(ss)
+            self.evals.append({
+                'label': eval_label,
+                'params': p,
+                'counts': [T, R, K, A, M],
+                'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'precision': precision,
+                'recall':   recall,
+                'scores': scores,
+            })
 
         # print("EvalImgs")
         # print(self.evalImgs)
@@ -812,7 +853,9 @@ class COCOeval:
         Compute and display summary metrics for evaluation results.
         Note this functin can *only* be applied on the default parameter setting
         '''
-        def _summarize( ap=1, iouThr=None, areaRng='all', maxDets=100):
+        def _summarize( ap=1, iouThr=None, areaRng='all', maxDets=100, eval=None):
+            if eval is None:
+                eval = self.eval
             p = self.params
             # https://github.com/cocodataset/cocoapi/pull/405
             iStr = ' {:<18} {} @[ IoU={:<9} | area={:>6s} | maxDets={:>3d} ] = {: 0.3f}'
@@ -825,7 +868,7 @@ class COCOeval:
             mind = [i for i, mDet in enumerate(p.maxDets) if mDet == maxDets]
             if ap == 1:
                 # dimension of precision: [TxRxKxAxM]
-                s = self.eval['precision']
+                s = eval['precision']
                 # IoU
                 if iouThr is not None:
                     t = np.where(iouThr == p.iouThrs)[0]
@@ -833,7 +876,7 @@ class COCOeval:
                 s = s[:,:,:,aind,mind]
             else:
                 # dimension of recall: [TxKxAxM]
-                s = self.eval['recall']
+                s = eval['recall']
                 if iouThr is not None:
                     t = np.where(iouThr == p.iouThrs)[0]
                     s = s[t]
@@ -892,21 +935,21 @@ class COCOeval:
 
             return stats
 
-        def _summarizeKps():
+        def _summarizeKps(eval=None):
             stats = np.zeros((10,))
-            stats[0] = _summarize(1, maxDets=20)
-            stats[1] = _summarize(1, maxDets=20, iouThr=.5)
-            stats[2] = _summarize(1, maxDets=20, iouThr=.75)
-            stats[3] = _summarize(1, maxDets=20, areaRng='medium')
-            stats[4] = _summarize(1, maxDets=20, areaRng='large')
-            stats[5] = _summarize(0, maxDets=20)
-            stats[6] = _summarize(0, maxDets=20, iouThr=.5)
-            stats[7] = _summarize(0, maxDets=20, iouThr=.75)
-            stats[8] = _summarize(0, maxDets=20, areaRng='medium')
-            stats[9] = _summarize(0, maxDets=20, areaRng='large')
+            stats[0] = _summarize(1, maxDets=20, eval=eval)
+            stats[1] = _summarize(1, maxDets=20, iouThr=.5, eval=eval)
+            stats[2] = _summarize(1, maxDets=20, iouThr=.75, eval=eval)
+            stats[3] = _summarize(1, maxDets=20, areaRng='medium', eval=eval)
+            stats[4] = _summarize(1, maxDets=20, areaRng='large', eval=eval)
+            stats[5] = _summarize(0, maxDets=20, eval=eval)
+            stats[6] = _summarize(0, maxDets=20, iouThr=.5, eval=eval)
+            stats[7] = _summarize(0, maxDets=20, iouThr=.75, eval=eval)
+            stats[8] = _summarize(0, maxDets=20, areaRng='medium', eval=eval)
+            stats[9] = _summarize(0, maxDets=20, areaRng='large', eval=eval)
             return stats
 
-        if not self.eval:
+        if not self.eval and not self.evals:
             raise Exception('Please run accumulate() first')
         iouType = self.params.iouType
         if iouType == 'segm' or iouType == 'bbox':
@@ -915,7 +958,15 @@ class COCOeval:
             summarize = _summarizeKps_crowd
         elif 'keypoints' in iouType:
             summarize = _summarizeKps
-        self.stats = summarize()
+        
+        if 'keypoints' in iouType and self.use_visibility:
+            self.stats = []
+            for eval in self.evals:
+                print("-"*10, eval['label'], "-"*10)
+                self.stats.append(summarize(eval=eval))
+            self.stats = self.stats[0]
+        else:
+            self.stats = summarize()
 
     def __str__(self):
         self.summarize()

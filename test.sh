@@ -1,17 +1,23 @@
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/hrnet_w48_test_384x288.py"
 # WEIGHTS="models/pretrained/hrnet_w48_coco_384x288-314c8528_20200708.pth"
 
-# CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192.py"
+CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192.py"
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_base_coco_256x192.py"
-CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_huge_coco_256x192.py"
+# CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_huge_coco_256x192.py"
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_large_simple_synthetic_256x192.py"
 
-# WEIGHTS="models/pretrained/vitpose-s.pth"
-WEIGHTS="models/pretrained/vitpose-h.pth"
+WEIGHTS="models/pretrained/vitpose-s.pth"
+# WEIGHTS="models/pretrained/vitpose-h.pth"
 # WEIGHTS="models/pretrained/vitpose-b-multi-coco.pth"
 # WEIGHTS="models/pretrained/vitpose-h-multi-coco.pth"
 
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_vis2_only/best_AP_epoch_206.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_retrain/best_AP_epoch_205.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_vis12/best_AP_epoch_206.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_force_zeros/best_AP_epoch_210.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_force_zeros_when_known/best_AP_epoch_209.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_vis2_force_known_zeros/best_AP_epoch_203.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_blackout/best_AP_epoch_210.pth"
 
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTOM_rotated_256x192/best_AP_epoch_17.pth"
 # WEIGHTS="work_dirs/ViTPose_huge_combo_finetune_3kBOTOM_rotated_256x192_lr5e5/best_AP_epoch_17.pth"

@@ -71,7 +71,16 @@ class COCOeval:
     # developed to support multiple pose-related datasets, including COCO,
     # CrowdPose and so on.
 
-    def __init__(self, cocoGt=None, cocoDt=None, iouType='keypoints', sigmas=None, use_area=True, use_visibility=False):
+    def __init__(
+            self,
+            cocoGt=None,
+            cocoDt=None,
+            iouType='keypoints',
+            sigmas=None,
+            use_area=True,
+            extended_oks=False,
+            confidence_thr=1e-10,
+        ):
         '''
         Initialize CocoEval using coco APIs for gt and dt
         :param cocoGt: coco object with ground truth annotations
@@ -106,7 +115,10 @@ class COCOeval:
             self.anno_file = cocoGt.anno_file
         self.use_area = use_area
         self.score_key = 'score'
-        self.use_visibility = use_visibility
+
+        self.extended_oks = extended_oks
+        self.gt_visibilities = [1, 2]    # Skip visibility level 0 as it is not evaluated
+        self.confidence_thr = confidence_thr
 
     def _prepare(self):
         '''
@@ -250,62 +262,29 @@ class COCOeval:
         self._prepare()
         # loop through images, area range, max detection number
         catIds = p.catIds if p.useCats else [-1]
-
-        # print("DTs:")
-        # for dt in self._dts[0, 1]:
-        #     print(dt["id"], end=", ")
-        # print()
-
-        # print("GTs:")
-        # for gt in self._gts[0, 1]:
-        #     print(gt["id"], end=", ")
-        # print()
         
         if p.iouType == 'segm' or p.iouType == 'bbox':
             computeIoU = self.computeIoU
         elif 'keypoints' in p.iouType:
-            computeIoU = self.computeOks
-        self.ious = {(imgId, catId): computeIoU(imgId, catId) \
+            computeIoU = self.computeExtendedOks
+        
+        if self.extended_oks:
+            print("Using extended OKS...")
+
+        self.ious = {(imgId, catId): computeIoU(imgId, catId, original= not self.extended_oks) \
                         for imgId in p.imgIds
                         for catId in catIds}
-        
-        if 'keypoints' in p.iouType and self.use_visibility:
-            self.ious_vis1 = {(imgId, catId): self.computeOks(imgId, catId, visibility_condition=lambda x: x == 1) \
-                            for imgId in p.imgIds
-                            for catId in catIds}
-            self.ious_vis2 = {(imgId, catId): self.computeOks(imgId, catId, visibility_condition=lambda x: x == 2) \
-                            for imgId in p.imgIds
-                            for catId in catIds}
-
-        # tmp_ious = {(imgId, catId): self.computeOksPerKpt(imgId, catId) \
-        #                 for imgId in p.imgIds
-        #                 for catId in catIds}
 
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
         self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet,
                                     #   return_matching=True, match_by_bbox=True
-                                      )
+                                    )
                  for catId in catIds
                  for areaRng in p.areaRng
                  for imgId in p.imgIds
              ]
-        if 'keypoints' in p.iouType and self.use_visibility:
-            self.evalImgs_vis1 = [evaluateImg(imgId, catId, areaRng, maxDet,
-                                        given_ious=self.ious_vis1)
-                    for catId in catIds
-                    for areaRng in p.areaRng
-                    for imgId in p.imgIds
-                ]
-            self.evalImgs_vis2 = [evaluateImg(imgId, catId, areaRng, maxDet,
-                                        given_ious=self.ious_vis2)
-                    for catId in catIds
-                    for areaRng in p.areaRng
-                    for imgId in p.imgIds
-                ]
 
-
-        
         self.matched_pairs = []
         for imgId in p.imgIds:
             img_eval = self.evaluateImg(
@@ -315,7 +294,7 @@ class COCOeval:
                 maxDet,
                 return_matching=True,
                 match_by_bbox=False,
-            )
+            )[0]
             if img_eval is None or "assigned_pairs" not in img_eval:
                 continue
             self.matched_pairs.extend(img_eval['assigned_pairs'])
@@ -403,6 +382,10 @@ class COCOeval:
                 g = np.array(gt['keypoints'])
 
             xg = g[0::3]; yg = g[1::3]; vg = g[2::3]
+            # print("="*30)
+            # print("OKS computation, GT:")
+            # for x, y, v in zip (xg, yg, vg):
+            #     print("{:6.1f}, {:6.1f}, {:6.1f}".format(x, y, v))
             k1 = np.count_nonzero(visibility_condition(vg))
             bb = gt['bbox']
             x0 = bb[0] - bb[2]; x1 = bb[0] + bb[2] * 2
@@ -429,6 +412,10 @@ class COCOeval:
 
                 xd = d[0::3]; yd = d[1::3]
                 det_conf = d[2::3]
+                # print("\tPrediction:")
+                # for x, y, v in zip (xd, yd, det_conf):
+                #     print("\t{:6.1f}, {:6.1f}, {:6.1f}".format(x, y, v))
+                
                 if k1>0:
                     # measure the per-keypoint distance if keypoints visible
                     dx = xd - xg
@@ -496,8 +483,8 @@ class COCOeval:
                 ious[i, j] = np.sum(np.exp(-e)) / e.shape[0]
                 # print("OKS", np.sum(np.exp(-e)) / e.shape[0])
         return ious
-
-    def computeOksPerKpt(self, imgId, catId):
+    
+    def computeExtendedOks(self, imgId, catId, original=False):
         p = self.params
         # dimention here should be Nxm
         gts = self._gts[imgId, catId]
@@ -506,21 +493,21 @@ class COCOeval:
         dts = [dts[i] for i in inds]
         if len(dts) > p.maxDets[-1]:
             dts = dts[0:p.maxDets[-1]]
-        # if len(gts) == 0 and len(dts) == 0:
         if len(gts) == 0 or len(dts) == 0:
-            return []
-        ious = np.zeros((len(dts), len(gts), 17))
+            return [[] for _ in range(len(self.gt_visibilities)+1)]
         sigmas = self.sigmas
         vars = (sigmas * 2)**2
         k = len(sigmas)
 
-        # if len(gts) > 0:
-        #     print()
-        #     print("ComputeOksPerKpt({}, {})".format(imgId, catId))
+        # Prepare ious for each visibility level
+        ious = [np.zeros((len(dts), len(gts))) for _ in self.gt_visibilities]
+        # Plus the default v > 0 level
+        ious.insert(0, np.zeros((len(dts), len(gts))))
 
         # compute oks between each detection and ground truth object
         for j, gt in enumerate(gts):
-            # create bounds for ignore regions(double the gt bbox)
+
+            # Load the GT
             if p.iouType == 'keypoints_wholebody':
                 body_gt = gt['keypoints']
                 foot_gt = gt['foot_kpts']
@@ -541,11 +528,20 @@ class COCOeval:
                 g = np.array(gt['keypoints'])
 
             xg = g[0::3]; yg = g[1::3]; vg = g[2::3]
-            k1 = np.count_nonzero(vg > 0)
+            
+            # Count the number of keypoints visible for each visibility level
+            vis_masks = [vg == vis for vis in self.gt_visibilities]
+            # Plus the default v > 0 level 
+            vis_masks.insert(0, vg > 0)
+            
+            # create bounds for ignore regions(double the gt bbox)
             bb = gt['bbox']
             x0 = bb[0] - bb[2]; x1 = bb[0] + bb[2] * 2
             y0 = bb[1] - bb[3]; y1 = bb[1] + bb[3] * 2
+            
             for i, dt in enumerate(dts):
+
+                # Load the pred
                 if p.iouType == 'keypoints_wholebody':
                     body_dt = dt['keypoints']
                     foot_dt = dt['foot_kpts']
@@ -566,38 +562,77 @@ class COCOeval:
                     d = np.array(dt['keypoints'])
 
                 xd = d[0::3]; yd = d[1::3]
-                if k1>0:
-                    # measure the per-keypoint distance if keypoints visible
-                    dx = xd - xg
-                    dy = yd - yg
+                vd = d[2::3]
+                vd[vd < self.confidence_thr] = 0
+                vd[vd >= self.confidence_thr] = 1
+                
+                for iou, vis_mask in zip(ious, vis_masks):
 
-                    # print(j, i)
-                    # print("dx", dx.shape)
-                    # print(dx)
+                    if original:
+                        if np.count_nonzero(vis_mask)>0:
+                            # measure the per-keypoint distance if keypoints visible
+                            dx = xd - xg
+                            dy = yd - yg
+                        else:
+                            # measure minimum distance to keypoints in (x0,y0) & (x1,y1)
+                            z = np.zeros((k))
+                            dx = np.max((z, x0-xd),axis=0)+np.max((z, xd-x1),axis=0)
+                            dy = np.max((z, y0-yd),axis=0)+np.max((z, yd-y1),axis=0)
+                    
+                    else:
+                        # Initialize the distance with zeros
+                        dx = np.zeros((k))
+                        dy = np.zeros((k))
 
-                else:
-                    # measure minimum distance to keypoints in (x0,y0) & (x1,y1)
-                    z = np.zeros((k))
-                    dx = np.max((z, x0-xd),axis=0)+np.max((z, xd-x1),axis=0)
-                    dy = np.max((z, y0-yd),axis=0)+np.max((z, yd-y1),axis=0)
+                        # Compute distance when both GT and pred is visible 
+                        in_mask = np.logical_and(
+                            vg > 0,
+                            vg <=2,
+                        )
+                        in_mask = np.logical_and(in_mask, vd > 0)
+                        in_mask = np.logical_and(in_mask, vis_mask)
+                        if np.count_nonzero(in_mask) > 0:
+                            dx[in_mask] = xd[in_mask] - xg[in_mask]
+                            dy[in_mask] = yd[in_mask] - yg[in_mask]
+                        
+                        # Compute distance when GT is not visible but pred is visible
+                        out_mask = np.logical_and(
+                            vg > 2,
+                            vd > 0,
+                        )
+                        out_mask = np.logical_and(out_mask, vis_mask)
+                        if np.count_nonzero(out_mask) > 0:
+                            xd[out_mask] = np.clip(xd[out_mask], x0, x1)
+                            yd[out_mask] = np.clip(yd[out_mask], y0, y1)
+                            dx[out_mask] = np.maximum(xd[out_mask] - x0, x1 - xd[out_mask])
+                            dy[out_mask] = np.maximum(yd[out_mask] - y0, y1 - yd[out_mask])
 
-                if self.use_area:
-                    e = (dx**2 + dy**2) / vars / (gt['area']+np.spacing(1)) / 2
-                else:
-                    tmparea = gt['bbox'][3] * gt['bbox'][2] * 0.53
-                    e = (dx**2 + dy**2) / vars / (tmparea+np.spacing(1)) / 2
+                        # Compute distance when GT is visible but pred is not visible
+                        miss_mask = np.logical_and(
+                            vg > 0,
+                            vg <= 2,
+                        )
+                        miss_mask = np.logical_and(miss_mask, vd == 0)
+                        miss_mask = np.logical_and(miss_mask, vis_mask)
+                        if np.count_nonzero(miss_mask) > 0:
+                            xg[miss_mask] = np.clip(xg[miss_mask], x0, x1)
+                            yg[miss_mask] = np.clip(yg[miss_mask], y0, y1)
+                            dx[miss_mask] = np.maximum(xg[miss_mask] - x0, x1 - xg[miss_mask])
+                            dy[miss_mask] = np.maximum(yg[miss_mask] - y0, y1 - yg[miss_mask])
+                    
+                    if self.use_area:
+                        e = (dx**2 + dy**2) / vars / (gt['area']+np.spacing(1)) / 2
+                    else:
+                        tmparea = gt['bbox'][3] * gt['bbox'][2] * 0.53
+                        e = (dx**2 + dy**2) / vars / (tmparea+np.spacing(1)) / 2
 
-                # print(self.use_area)
-
-                vis_mask = np.ones(17, dtype=bool)
-                if k1 > 0:
-                    # e=e[vg > 0]
-                    vis_mask[vg <= 0] = False
-                ious[i, j, vis_mask] = e[vis_mask]
-                # ious[i, j] = np.sum(np.exp(-e)) / e.shape[0]
+                    if np.count_nonzero(vis_mask) > 0:
+                        e=e[vis_mask]
+                    iou[i, j] = np.sum(np.exp(-e)) / e.shape[0]
+        
         return ious
 
-    def evaluateImg(self, imgId, catId, aRng, maxDet, return_matching=False, match_by_bbox=False, given_ious=None):
+    def evaluateImg(self, imgId, catId, aRng, maxDet, return_matching=False, match_by_bbox=False):
         '''
         perform evaluation for single category and image
         :return: dict (single image results)
@@ -615,7 +650,7 @@ class COCOeval:
             gt = [_ for cId in p.catIds for _ in self._gts[imgId,cId]]
             dt = [_ for cId in p.catIds for _ in self._dts[imgId,cId]]
         if len(gt) == 0 and len(dt) ==0:
-            return None
+            return [None for _ in range(len(self.gt_visibilities)+1)]
         
         for g in gt:
             if 'area' not in g or not self.use_area:
@@ -633,12 +668,15 @@ class COCOeval:
         dtind = np.argsort([-d[self.score_key] for d in dt], kind='mergesort')
         dt = [dt[i] for i in dtind[0:maxDet]]
         iscrowd = [int(o['iscrowd']) for o in gt]
-        # load computed ious
-        if given_ious is None:
-            ious = self.ious[imgId, catId][:, gtind] if len(self.ious[imgId, catId]) > 0 else self.ious[imgId, catId]
-        else:
-            ious = given_ious[imgId, catId][:, gtind] if len(given_ious[imgId, catId]) > 0 else given_ious[imgId, catId]
-
+        
+        # Load pre-computed ious
+        ious = []
+        for i in range(len(self.gt_visibilities)+1):
+            if len(self.ious[imgId, catId][i]) > 0:
+                ious.append(self.ious[imgId, catId][i][:, gtind])
+            else:
+                ious.append(self.ious[imgId, catId][i])
+                
         T = len(iouThrs)
         G = len(gt)
         D = len(dt)
@@ -658,48 +696,16 @@ class COCOeval:
                         g_bbox = np.array(g["bbox"])
                         g_center = g_bbox[:2] + g_bbox[2:] / 2
                         if np.allclose(d_center, g_center):
-                            iou = ious[dind, gind] if not g["ignore"] else np.nan
+                            iou = ious[0][dind, gind] if not g["ignore"] else np.nan
                             assigned_pairs.append((d, g, iou))
                             dtIg[tind, dind] = gtIg[gind]
                             dtm[tind, dind]  = gt[gind]['id']
                             gtm[tind, gind]  = d['id']
                             break        
-        elif len(ious):            
-            for tind, t in enumerate(iouThrs):
-                
-                for dind, d in enumerate(dt):
-                    # information about best match so far (m=-1 -> unmatched)
-                    iou = min([t,1-1e-10])
-                    m   = -1
-                    for gind, g in enumerate(gt):
-                        # if this gt already matched, and not a crowd, continue
-                        if gtm[tind,gind] >= 0 and not iscrowd[gind]:
-                            continue
-                        # if dt matched to reg gt, and on ignore gt, stop
-                        # since all the rest of g's are ignored as well because of the prior sorting
-                        if m > -1 and gtIg[m] == 0 and gtIg[gind] == 1:
-                            break
-                        # continue to next gt unless better match made
-                        if ious[dind,gind] < iou:
-                            continue
-                        # if match successful and best so far, store appropriately
-                        iou = ious[dind,gind]
-                        m = gind
-                    
-                    if return_matching and not match_by_bbox:
-                        assigned_pairs.append((d, gt[m], iou if (m != -1 and gtIg[m] != 1) else np.nan))
-                    
-                    if m == -1:
-                        continue
-                    # if match made store id of match for both dt and gt
-                    dtIg[tind, dind] = gtIg[m]
-                    dtm[tind, dind]  = gt[m]['id']
-                    gtm[tind, m]     = d['id']
-        # set unmatched detections outside of area range to ignore
-        a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
-        dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
-        # store results for given image and category
-        return {
+            # set unmatched detections outside of area range to ignore
+            a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
+            dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
+            image_results = {
                 'image_id':             imgId,
                 'category_id':          catId,
                 'aRng':                 aRng,
@@ -714,6 +720,67 @@ class COCOeval:
                 'dtIgnore':             dtIg,
                 'gtIndices':            gtind,
             }
+        
+        else:
+            image_results = []
+            for iou in ious:
+                gtm = np.ones((T, G), dtype=np.int64) * -1
+                dtm = np.ones((T, D), dtype=np.int64) * -1
+                gtIg = np.array([g['_ignore'] for g in gt])
+                dtIg = np.zeros((T,D))
+                assigned_pairs = []
+                if len(iou):            
+                    for tind, t in enumerate(iouThrs):
+                        
+                        for dind, d in enumerate(dt):
+                            # information about best match so far (m=-1 -> unmatched)
+                            curr_iou = min([t,1-1e-10])
+                            m   = -1
+                            for gind, g in enumerate(gt):
+                                # if this gt already matched, and not a crowd, continue
+                                if gtm[tind,gind] >= 0 and not iscrowd[gind]:
+                                    continue
+                                # if dt matched to reg gt, and on ignore gt, stop
+                                # since all the rest of g's are ignored as well because of the prior sorting
+                                if m > -1 and gtIg[m] == 0 and gtIg[gind] == 1:
+                                    break
+                                # continue to next gt unless better match made
+                                if iou[dind,gind] < curr_iou:
+                                    continue
+                                # if match successful and best so far, store appropriately
+                                curr_iou = iou[dind,gind]
+                                m = gind
+                            
+                            if return_matching and not match_by_bbox:
+                                assigned_pairs.append((d, gt[m], curr_iou if (m != -1 and gtIg[m] != 1) else np.nan))
+                            
+                            if m == -1:
+                                continue
+                            # if match made store id of match for both dt and gt
+                            dtIg[tind, dind] = gtIg[m]
+                            dtm[tind, dind]  = gt[m]['id']
+                            gtm[tind, m]     = d['id']
+                # set unmatched detections outside of area range to ignore
+                a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
+                dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
+                # store results for given image and category
+                image_results.append({
+                    'image_id':             imgId,
+                    'category_id':          catId,
+                    'aRng':                 aRng,
+                    'maxDet':               maxDet,
+                    'dtIds':                [d['id'] for d in dt],
+                    'gtIds':                [g['id'] for g in gt],
+                    'dtMatches':            dtm,
+                    'gtMatches':            gtm,
+                    'assigned_pairs':       assigned_pairs,
+                    'dtScores':             [d[self.score_key] for d in dt],
+                    'gtIgnore':             gtIg,
+                    'dtIgnore':             dtIg,
+                    'gtIndices':            gtind,
+                })
+        
+        return image_results
 
     def accumulate(self, p = None):
         '''
@@ -729,49 +796,41 @@ class COCOeval:
         if p is None:
             p = self.params
         
-        eval_imgs = [self.evalImgs]
-        eval_labels = ['default']
-        if 'keypoints' in p.iouType and self.use_visibility:
-            eval_labels.append('vis1')
-            eval_imgs.append(self.evalImgs_vis1)
-            eval_labels.append('vis2')
-            eval_imgs.append(self.evalImgs_vis2)
+        p.catIds = p.catIds if p.useCats == 1 else [-1]
+        T           = len(p.iouThrs)
+        R           = len(p.recThrs)
+        K           = len(p.catIds) if p.useCats else 1
+        A           = len(p.areaRng)
+        M           = len(p.maxDets)
+        V           = len(self.gt_visibilities) + 1
+        precision   = -np.ones((T,V,R,K,A,M)) # -1 for the precision of absent categories
+        recall      = -np.ones((T,V,K,A,M))
+        scores      = -np.ones((T,V,R,K,A,M))
 
-        self.evals = []
-        for eval_img, eval_label in zip(eval_imgs, eval_labels):
-            p.catIds = p.catIds if p.useCats == 1 else [-1]
-            T           = len(p.iouThrs)
-            R           = len(p.recThrs)
-            K           = len(p.catIds) if p.useCats else 1
-            A           = len(p.areaRng)
-            M           = len(p.maxDets)
-            precision   = -np.ones((T,R,K,A,M)) # -1 for the precision of absent categories
-            recall      = -np.ones((T,K,A,M))
-            scores      = -np.ones((T,R,K,A,M))
-
-            # create dictionary for future indexing
-            _pe = self._paramsEval
-            catIds = _pe.catIds if _pe.useCats else [-1]
-            setK = set(catIds)
-            setA = set(map(tuple, _pe.areaRng))
-            setM = set(_pe.maxDets)
-            setI = set(_pe.imgIds)
-            # get inds to evaluate
-            k_list = [n for n, k in enumerate(p.catIds)  if k in setK]
-            m_list = [m for n, m in enumerate(p.maxDets) if m in setM]
-            a_list = [n for n, a in enumerate(map(lambda x: tuple(x), p.areaRng)) if a in setA]
-            i_list = [n for n, i in enumerate(p.imgIds)  if i in setI]
-            I0 = len(_pe.imgIds)
-            A0 = len(_pe.areaRng)
-            # retrieve E at each category, area range, and max number of detections
-            counter = 0
-            
-            for k, k0 in enumerate(k_list):
-                Nk = k0*A0*I0
+        # create dictionary for future indexing
+        _pe = self._paramsEval
+        catIds = _pe.catIds if _pe.useCats else [-1]
+        setK = set(catIds)
+        setA = set(map(tuple, _pe.areaRng))
+        setM = set(_pe.maxDets)
+        setI = set(_pe.imgIds)
+        # get inds to evaluate
+        k_list = [n for n, k in enumerate(p.catIds)  if k in setK]
+        m_list = [m for n, m in enumerate(p.maxDets) if m in setM]
+        a_list = [n for n, a in enumerate(map(lambda x: tuple(x), p.areaRng)) if a in setA]
+        i_list = [n for n, i in enumerate(p.imgIds)  if i in setI]
+        I0 = len(_pe.imgIds)
+        A0 = len(_pe.areaRng)
+        # retrieve E at each category, area range, and max number of detections
+        counter = 0
+        
+        for k, k0 in enumerate(k_list):
+            Nk = k0*A0*I0
+            for v in range(V):
                 for a, a0 in enumerate(a_list):
                     Na = a0*I0
                     for m, maxDet in enumerate(m_list):
-                        E = [eval_img[Nk + Na + i] for i in i_list]
+                        E = [self.evalImgs[Nk + Na + i][v] for i in i_list]
                         E = [e for e in E if not e is None]
                         if len(E) == 0:
                             continue
@@ -808,9 +867,9 @@ class COCOeval:
                             ss = np.zeros((R,))
 
                             if nd:
-                                recall[t,k,a,m] = rc[-1]
+                                recall[t,v,k,a,m] = rc[-1]
                             else:
-                                recall[t,k,a,m] = 0
+                                recall[t,v,k,a,m] = 0
 
                             # numpy is slow without cython optimization for accessing elements
                             # use python array gets significant speed improvement
@@ -827,23 +886,17 @@ class COCOeval:
                                     ss[ri] = dtScoresSorted[pi]
                             except:
                                 pass
-                            precision[t,:,k,a,m] = np.array(q)
-                            scores[t,:,k,a,m] = np.array(ss)
-            self.evals.append({
-                'label': eval_label,
-                'params': p,
-                'counts': [T, R, K, A, M],
-                'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'precision': precision,
-                'recall':   recall,
-                'scores': scores,
-            })
+                            precision[t,v,:,k,a,m] = np.array(q)
+                            scores[t,v,:,k,a,m] = np.array(ss)
 
-        # print("EvalImgs")
-        # print(self.evalImgs)
-
-        # print("scores")
-        # print(scores.shape)
+        self.eval = {
+            'params': p,
+            'counts': [T, V, R, K, A, M],
+            'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'precision': precision,
+            'recall':   recall,
+            'scores': scores,
+        }
 
         toc = time.time()
         print('DONE (t={:0.2f}s).'.format( toc-tic))
@@ -853,12 +906,11 @@ class COCOeval:
         Compute and display summary metrics for evaluation results.
         Note this functin can *only* be applied on the default parameter setting
         '''
-        def _summarize( ap=1, iouThr=None, areaRng='all', maxDets=100, eval=None):
-            if eval is None:
-                eval = self.eval
+        def _summarize( ap=1, iouThr=None, areaRng='all', maxDets=100, visibility=None):
+            assert visibility in self.gt_visibilities + [None]
             p = self.params
             # https://github.com/cocodataset/cocoapi/pull/405
-            iStr = ' {:<18} {} @[ IoU={:<9} | area={:>6s} | maxDets={:>3d} ] = {: 0.3f}'
+            iStr = ' {:<18} {} @[ IoU={:<9} | area={:>6s} | maxDets={:>3d} | vis={:>5s} ] = {: 0.3f}'
             titleStr = 'Average Precision' if ap == 1 else 'Average Recall'
             typeStr = '(AP)' if ap==1 else '(AR)'
             iouStr = '{:0.2f}:{:0.2f}'.format(p.iouThrs[0], p.iouThrs[-1]) \
@@ -866,26 +918,35 @@ class COCOeval:
 
             aind = [i for i, aRng in enumerate(p.areaRngLbl) if aRng == areaRng]
             mind = [i for i, mDet in enumerate(p.maxDets) if mDet == maxDets]
+            v = 0 if visibility is None else self.gt_visibilities.index(visibility) + 1
+            
+            if v > 0:
+                visStr = '[{:d}]'.format(v)
+            elif self.extended_oks:
+                visStr = '[>0]'
+            else:
+                visStr = '[1,2]'
+            
             if ap == 1:
                 # dimension of precision: [TxRxKxAxM]
-                s = eval['precision']
+                s = self.eval['precision']
                 # IoU
                 if iouThr is not None:
                     t = np.where(iouThr == p.iouThrs)[0]
                     s = s[t]
-                s = s[:,:,:,aind,mind]
+                s = s[:,v,:,:,aind,mind]
             else:
                 # dimension of recall: [TxKxAxM]
-                s = eval['recall']
+                s = self.eval['recall']
                 if iouThr is not None:
                     t = np.where(iouThr == p.iouThrs)[0]
                     s = s[t]
-                s = s[:,:,aind,mind]
+                s = s[:,v,:,aind,mind]
             if len(s[s>-1])==0:
                 mean_s = -1
             else:
                 mean_s = np.mean(s[s>-1])
-            print(iStr.format(titleStr, typeStr, iouStr, areaRng, maxDets, mean_s))
+            print(iStr.format(titleStr, typeStr, iouStr, areaRng, maxDets, visStr, mean_s))
             return mean_s
 
         def _summarizeDets():
@@ -936,20 +997,22 @@ class COCOeval:
             return stats
 
         def _summarizeKps(eval=None):
-            stats = np.zeros((10,))
-            stats[0] = _summarize(1, maxDets=20, eval=eval)
-            stats[1] = _summarize(1, maxDets=20, iouThr=.5, eval=eval)
-            stats[2] = _summarize(1, maxDets=20, iouThr=.75, eval=eval)
-            stats[3] = _summarize(1, maxDets=20, areaRng='medium', eval=eval)
-            stats[4] = _summarize(1, maxDets=20, areaRng='large', eval=eval)
-            stats[5] = _summarize(0, maxDets=20, eval=eval)
-            stats[6] = _summarize(0, maxDets=20, iouThr=.5, eval=eval)
-            stats[7] = _summarize(0, maxDets=20, iouThr=.75, eval=eval)
-            stats[8] = _summarize(0, maxDets=20, areaRng='medium', eval=eval)
-            stats[9] = _summarize(0, maxDets=20, areaRng='large', eval=eval)
+            stats = np.zeros((12,))
+            stats[ 0] = _summarize(1, maxDets=20)
+            stats[ 5] = _summarize(1, maxDets=20, visibility=1)
+            stats[ 6] = _summarize(1, maxDets=20, visibility=2)
+            stats[ 1] = _summarize(1, maxDets=20, iouThr=.5)
+            stats[ 2] = _summarize(1, maxDets=20, iouThr=.75)
+            stats[ 3] = _summarize(1, maxDets=20, areaRng='medium')
+            stats[ 4] = _summarize(1, maxDets=20, areaRng='large')
+            stats[ 7] = _summarize(0, maxDets=20)
+            stats[ 8] = _summarize(0, maxDets=20, iouThr=.5)
+            stats[ 9] = _summarize(0, maxDets=20, iouThr=.75)
+            stats[10] = _summarize(0, maxDets=20, areaRng='medium')
+            stats[11] = _summarize(0, maxDets=20, areaRng='large')
             return stats
 
-        if not self.eval and not self.evals:
+        if not self.eval:
             raise Exception('Please run accumulate() first')
         iouType = self.params.iouType
         if iouType == 'segm' or iouType == 'bbox':
@@ -959,14 +1022,7 @@ class COCOeval:
         elif 'keypoints' in iouType:
             summarize = _summarizeKps
         
-        if 'keypoints' in iouType and self.use_visibility:
-            self.stats = []
-            for eval in self.evals:
-                print("-"*10, eval['label'], "-"*10)
-                self.stats.append(summarize(eval=eval))
-            self.stats = self.stats[0]
-        else:
-            self.stats = summarize()
+        self.stats = summarize()
 
     def __str__(self):
         self.summarize()

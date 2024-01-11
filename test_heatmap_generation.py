@@ -48,15 +48,23 @@ def test_generate_target(input_data, save_dir="TargetTest", show=True):
 
 if __name__ == "__main__":
     
-    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_force_zeros.py")
+    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_blackout.py")
     dataset = build_dataset(cfg.data.train)
     results = dataset[np.random.randint(0, len(dataset))]
     target = results["target"]
     visibilities = results["joints_3d_visible"]
     target_weight = results["target_weight"]
+    img = np.array(results["img"]).transpose(1, 2, 0)
+    img -= np.min(img)
+    img /= np.max(img)
+    img *= 255
+    img = img.astype(np.uint8)
 
     print(target.shape)
     for w, v, tg in zip(target_weight, visibilities, target):
         print("weight:", w, "\tvisibility:", v, "\ttarget all zero:", np.all(tg == 0))
+
+    # Save the image
+    cv2.imwrite("TargetTest/00_img.png", img)
 
     # heatmaps, target = test_generate_target(input_data, show=True)

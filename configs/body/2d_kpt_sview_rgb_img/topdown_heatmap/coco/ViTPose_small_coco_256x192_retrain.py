@@ -128,7 +128,9 @@ train_pipeline = [
         target_type=target_type),
     dict(
         type='Collect',
-        keys=['img', 'target', 'target_weight'],
+        keys=['img', 'target', 'target_weight',
+            'joints_3d', 'joints_3d_visible', 'ann_info'
+        ],
         meta_keys=[
             'image_file', 'joints_3d', 'joints_3d_visible', 'center', 'scale',
             'rotation', 'bbox_score', 'flip_pairs'

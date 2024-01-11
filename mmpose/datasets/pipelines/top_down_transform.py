@@ -292,6 +292,47 @@ class TopDownGetRandomScaleRotation:
 
 
 @PIPELINES.register_module()
+class RandomBlackMask:
+    """Mask random parts of the image with black.
+
+    Required keys:'img'.
+
+    Modified keys:'img'.
+
+    Args:
+        min_mask (float): Minimum part of the image to be masked.
+            Default: 0.0
+        max_mask (float): Maximum part of the image to be masked.
+            Default: 0.5
+        mask_prob (float): Probability of masking the image.
+            Default: 1.0
+    """
+
+    def __init__(self, min_mask=0.0, max_mask=0.5, mask_prob=1.0):
+        self.min_mask = min_mask
+        self.max_mask = max_mask
+        self.mask_prob = mask_prob
+
+    def __call__(self, results):
+        """Perform data augmentation with random masking."""
+        img = results['img']
+        
+        if np.random.rand() < self.mask_prob:
+            h, w, _ = img.shape
+            rh, rw = np.random.uniform(1-self.max_mask, 1-self.min_mask, 2)
+            dh = int(h * rh)
+            dw = int(w * rw)
+            x = np.random.randint(0, w - dw)
+            y = np.random.randint(0, h - dh)
+            # print(x, y, dw, dh)
+            mask = np.zeros((h, w), dtype=np.uint8)
+            mask[y:y+dh, x:x+dw] = 1
+            img[mask == 0] = 0
+            results['img'] = img
+
+        return results
+
+@PIPELINES.register_module()
 class TopDownAffine:
     """Affine transform the image to make input.
 
@@ -582,8 +623,8 @@ class TopDownGenerateTarget:
         use_different_joint_weights = cfg['use_different_joint_weights']
 
         target_weight = np.ones((num_joints, 1), dtype=np.float32)
-        if ignore_zeros:
-            target_weight[:, 0] = np.minimum(1, joints_3d_visible[:, 0])
+        # if ignore_zeros:
+        target_weight[:, 0] = np.minimum(1, joints_3d_visible[:, 0])
 
         if target_type.lower() == 'GaussianHeatmap'.lower():
             target = np.zeros((num_joints, heatmap_size[1], heatmap_size[0]),
@@ -597,11 +638,11 @@ class TopDownGenerateTarget:
             y = x[:, None]
 
             for joint_id in range(num_joints):
+                vis = int(joints_3d_visible[joint_id, 0])
                 # print(joint_id, joints_3d[joint_id, :], joints_3d_visible[joint_id, :])
                 # print(vis, vis in valid_visibilities, valid_visibilities)
 
                 # Check that the keypoint visibility is valid
-                vis = joints_3d_visible[joint_id, 0]
                 if vis not in valid_visibilities:
                     # If not, just return the image as is
                     if ignore_zeros:

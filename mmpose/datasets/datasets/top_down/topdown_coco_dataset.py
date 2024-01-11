@@ -9,6 +9,7 @@ import numpy as np
 from mmcv import Config, deprecated_api_warning
 # from xtcocotools.cocoeval import COCOeval
 from ._cocoeval import COCOeval
+# from ._cocoeval_orig import COCOeval
 
 from ....core.post_processing import oks_nms, soft_oks_nms
 from ...builder import DATASETS
@@ -573,7 +574,14 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
     def _do_python_keypoint_eval(self, res_file, return_wrong_images=False):
         """Keypoint evaluation using COCOAPI."""
         coco_det = self.coco.loadRes(res_file)
-        coco_eval = COCOeval(self.coco, coco_det, 'keypoints', self.sigmas, use_visibility=True)
+        coco_eval = COCOeval(
+            self.coco,
+            coco_det,
+            'keypoints',
+            self.sigmas,                # Commented out in the original
+            extended_oks=True,          # Commented out in the original
+            confidence_thr=0.3          # Commented out in the original
+        )
         coco_eval.params.useSegm = None
         coco_eval.evaluate()
         coco_eval.accumulate()

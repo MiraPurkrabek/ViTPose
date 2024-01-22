@@ -117,7 +117,8 @@ class COCOeval:
         self.score_key = 'score'
 
         self.extended_oks = extended_oks
-        self.gt_visibilities = [1, 2]    # Skip visibility level 0 as it is not evaluated
+        # self.gt_visibilities = [1, 2]    # Skip visibility level 0 as it is not evaluated
+        self.gt_visibilities = []
         self.confidence_thr = confidence_thr
 
     def _prepare(self):
@@ -186,8 +187,16 @@ class COCOeval:
                 gt['ignore'] = (k == 0) or gt['ignore']
         self._gts = defaultdict(list)       # gt for evaluation
         self._dts = defaultdict(list)       # dt for evaluation
+        self.gt_visibilities = set()
         for gt in gts:
             self._gts[gt['image_id'], gt['category_id']].append(gt)
+            if 'keypoints' in gt:
+                kpts = gt['keypoints']
+                vis = np.unique(kpts[2::3])
+                self.gt_visibilities.update(vis)
+        self.gt_visibilities = sorted(list(self.gt_visibilities))
+        self.gt_visibilities = [vis for vis in self.gt_visibilities if vis > 0]
+        print("Evaluating {:d} levels of visibility".format(len(self.gt_visibilities)+1))
 
         flag_no_part_score = False
         for dt in dts:
@@ -293,7 +302,7 @@ class COCOeval:
                 [0, 1e5**2],
                 maxDet,
                 return_matching=True,
-                match_by_bbox=False,
+                match_by_bbox=True,
             )[0]
             if img_eval is None or "assigned_pairs" not in img_eval:
                 continue
@@ -705,7 +714,7 @@ class COCOeval:
             # set unmatched detections outside of area range to ignore
             a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
             dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
-            image_results = {
+            image_results = [{
                 'image_id':             imgId,
                 'category_id':          catId,
                 'aRng':                 aRng,
@@ -719,7 +728,7 @@ class COCOeval:
                 'gtIgnore':             gtIg,
                 'dtIgnore':             dtIg,
                 'gtIndices':            gtind,
-            }
+            }]
         
         else:
             image_results = []
@@ -997,19 +1006,23 @@ class COCOeval:
             return stats
 
         def _summarizeKps(eval=None):
-            stats = np.zeros((12,))
+            num_vis = len(self.gt_visibilities)
+            stats = np.zeros((10 + num_vis,))
+
             stats[ 0] = _summarize(1, maxDets=20)
-            stats[ 5] = _summarize(1, maxDets=20, visibility=1)
-            stats[ 6] = _summarize(1, maxDets=20, visibility=2)
+            
+            for vi, v in enumerate(self.gt_visibilities):
+                stats[ 5+vi] = _summarize(1, maxDets=20, visibility=v)
+            
             stats[ 1] = _summarize(1, maxDets=20, iouThr=.5)
             stats[ 2] = _summarize(1, maxDets=20, iouThr=.75)
             stats[ 3] = _summarize(1, maxDets=20, areaRng='medium')
             stats[ 4] = _summarize(1, maxDets=20, areaRng='large')
-            stats[ 7] = _summarize(0, maxDets=20)
-            stats[ 8] = _summarize(0, maxDets=20, iouThr=.5)
-            stats[ 9] = _summarize(0, maxDets=20, iouThr=.75)
-            stats[10] = _summarize(0, maxDets=20, areaRng='medium')
-            stats[11] = _summarize(0, maxDets=20, areaRng='large')
+            stats[ 5+num_vis] = _summarize(0, maxDets=20)
+            stats[ 6+num_vis] = _summarize(0, maxDets=20, iouThr=.5)
+            stats[ 7+num_vis] = _summarize(0, maxDets=20, iouThr=.75)
+            stats[ 8+num_vis] = _summarize(0, maxDets=20, areaRng='medium')
+            stats[ 9+num_vis] = _summarize(0, maxDets=20, areaRng='large')
             return stats
 
         if not self.eval:

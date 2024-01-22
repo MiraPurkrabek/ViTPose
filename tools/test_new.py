@@ -218,7 +218,6 @@ def main():
 
     print("\nInference done")
 
-    # print(outputs[0]["preds"].shape)
 
     rank, _ = get_dist_info()
     eval_config = cfg.get('evaluation', {})
@@ -235,6 +234,41 @@ def main():
             print(f'\nwriting results to {args.out}')
             mmcv.dump(outputs, args.out)
 
+        config_name = ".".join(os.path.basename(args.config).split(".")[:-1])
+        save_dir = os.path.join(
+            cfg.data_root,
+            # "test_all_visualization",
+            "test_visualization",
+            config_name,
+        )
+        os.makedirs(save_dir, exist_ok=True)
+        
+        heatmaps = np.concatenate([o["output_heatmap"] for o in outputs], axis=0)
+        print("="*20)
+        print("Heatmaps shape:", heatmaps.shape)
+        print("Heatmaps avg:", np.mean(heatmaps))
+        print("Heatmaps med:", np.median(heatmaps))
+        print("Heatmaps min:", np.min(heatmaps))
+        print("Heatmaps max:", np.max(heatmaps))
+        plt.hist(heatmaps.flatten(), bins=100, log=True)
+        plt.title("Heatmaps histogram (log scale)")
+        plt.grid(True)
+        plt.savefig(osp.join(save_dir, "..", "test_heatmap_histogram.png"))
+        plt.cla()
+
+        print("+"*10)
+        kpts_sums = np.sum(heatmaps, axis=(2, 3))
+        print("Heatmaps avg sum:", np.mean(kpts_sums))
+        print("Heatmaps med sum:", np.median(kpts_sums))
+        print("Heatmaps min sum:", np.min(kpts_sums))
+        print("Heatmaps max sum:", np.max(kpts_sums))
+        plt.hist(kpts_sums.flatten(), bins=100)
+        plt.title("Heatmaps sum histogram")
+        plt.grid(True)
+        plt.savefig(osp.join(save_dir, "..", "test_heatmap_sum_histogram.png"))
+
+        print("="*20)
+
         # print("="*30)
         # results_per_kpt = dataset.evaluate_per_kpts(outputs, cfg.work_dir, return_score=True, **eval_config)
         # kpts = dataset.coco.dataset["categories"][0]["keypoints"]
@@ -247,14 +281,6 @@ def main():
         print("Number of sorted matches:", len(sorted_matches))
         oks_list = np.array([m[2] for m in sorted_matches])
         print("Dataset evaluated")
-
-        config_name = ".".join(os.path.basename(args.config).split(".")[:-1])
-        save_dir = os.path.join(
-            cfg.data_root,
-            # "test_all_visualization",
-            "test_visualization",
-            config_name,
-        )
 
         # Prepare datastructure
         shutil.rmtree(save_dir, ignore_errors=True)
@@ -366,15 +392,15 @@ def main():
             bbox_wh = np.array(annotation["bbox"]).reshape(1, 4)
             gt_pose_results.append({
                 "keypoints": kpt,
-                "bbox": bbox_xywh2xyxy(bbox_wh),
+                "bbox": bbox_wh,
             })
             gt_pose_vis.append({
                 "keypoints": vis_kpt,
-                "bbox": bbox_xywh2xyxy(bbox_wh),
+                "bbox": bbox_wh,
             })
             gt_pose_invis.append({
                 "keypoints": invis_kpt,
-                "bbox": bbox_xywh2xyxy(bbox_wh),
+                "bbox": bbox_wh,
             })
 
             
@@ -389,7 +415,7 @@ def main():
             
             pose_results.append({
                 "keypoints": dt["keypoints"],
-                "bbox": bbox_xy,
+                "bbox": bbox_wh,
             })
 
 

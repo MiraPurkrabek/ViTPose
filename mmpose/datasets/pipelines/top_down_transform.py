@@ -442,7 +442,8 @@ class TopDownGenerateTarget:
                  encoding='MSRA',
                  unbiased_encoding=False,
                  valid_visibilities=[1, 2],
-                 ignore_zeros=True):
+                 ignore_zeros=True,
+                 normalize=False):
         self.sigma = sigma
         self.unbiased_encoding = unbiased_encoding
         self.kernel = kernel
@@ -451,6 +452,7 @@ class TopDownGenerateTarget:
         self.encoding = encoding
         self.valid_visibilities = valid_visibilities
         self.ignore_zeros = ignore_zeros
+        self.normalize = normalize
 
     def _msra_generate_target(self, cfg, joints_3d, joints_3d_visible, sigma):
         """Generate the target heatmap via "MSRA" approach.
@@ -585,7 +587,7 @@ class TopDownGenerateTarget:
         return heatmaps, target_weight
 
     def _udp_generate_target(self, cfg, joints_3d, joints_3d_visible, factor,
-                             target_type, valid_visibilities=[1, 2], ignore_zeros=True):
+                             target_type, valid_visibilities=[1, 2], ignore_zeros=True, normalize=False):
         """Generate the target heatmap via 'UDP' approach. Paper ref: Huang et
         al. The Devil is in the Details: Delving into Unbiased Data Processing
         for Human Pose Estimation (CVPR 2020).
@@ -683,6 +685,11 @@ class TopDownGenerateTarget:
                 if v > 0.5:
                     target[joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
                         g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
+                    
+                    if normalize:
+                        target[joint_id] -= np.min(target[joint_id])
+                        if np.max(target[joint_id]) > 0:
+                            target[joint_id] /= np.max(target[joint_id])
 
         elif target_type.lower() == 'CombinedTarget'.lower():
             target = np.zeros(
@@ -793,14 +800,16 @@ class TopDownGenerateTarget:
                 for i in range(num_factors):
                     target_i, target_weight_i = self._udp_generate_target(
                         cfg, joints_3d, joints_3d_visible, factors[i],
-                        self.target_type, self.valid_visibilities, self.ignore_zeros)
+                        self.target_type, self.valid_visibilities, self.ignore_zeros,
+                        self.normalize)
                     target = np.concatenate([target, target_i[None]], axis=0)
                     target_weight = np.concatenate(
                         [target_weight, target_weight_i[None]], axis=0)
             else:
                 target, target_weight = self._udp_generate_target(
                     results['ann_info'], joints_3d, joints_3d_visible, factors,
-                    self.target_type, self.valid_visibilities, self.ignore_zeros)
+                    self.target_type, self.valid_visibilities, self.ignore_zeros,
+                    self.normalize)
         else:
             raise ValueError(
                 f'Encoding approach {self.encoding} is not supported!')

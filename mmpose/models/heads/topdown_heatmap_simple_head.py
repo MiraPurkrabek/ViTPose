@@ -10,6 +10,7 @@ from mmpose.models.builder import build_loss
 from mmpose.models.utils.ops import resize
 from ..builder import HEADS
 import torch.nn.functional as F
+from torch.nn import Sigmoid
 from .topdown_heatmap_base_head import TopdownHeatmapBaseHead
 
 
@@ -59,7 +60,8 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                  loss_keypoint=None,
                  train_cfg=None,
                  test_cfg=None,
-                 upsample=0,):
+                 upsample=0,
+                 normalize=False):
         super().__init__()
 
         self.in_channels = in_channels
@@ -143,6 +145,8 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
             else:
                 self.final_layer = layers[0]
 
+        self.normalize = normalize
+
     def get_loss(self, output, target, target_weight):
         """Calculate top-down keypoint loss.
 
@@ -199,6 +203,12 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
         x = self._transform_inputs(x)
         x = self.deconv_layers(x)
         x = self.final_layer(x)
+
+        if self.normalize:
+            # print("X before normalization", x.shape, x.sum(), x.min(), x.max())
+            x = Sigmoid()(x)
+            # print("X after normalization", x.shape, x.sum(), x.min(), x.max())
+
         return x
 
     def inference_model(self, x, flip_pairs=None):

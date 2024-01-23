@@ -109,6 +109,7 @@ class COCOeval:
         self.params = Params(iouType=iouType) # parameters
         self._paramsEval = {}               # parameters for evaluation
         self.stats = []                     # result summarization
+        self.stats_names = []                # names of summarized metrics
         self.ious = {}                      # ious between all gts and dts
         if not cocoGt is None:
             self.params.imgIds = sorted(cocoGt.getImgIds())
@@ -1010,19 +1011,45 @@ class COCOeval:
 
         def _summarizeDets():
             stats = np.zeros((12,))
+            stat_names = [None] * stats.shape[0]
+            
             stats[0] = _summarize(1)
+            stat_names[0] = 'AP'
+            
             stats[1] = _summarize(1, iouThr=.5, maxDets=self.params.maxDets[2])
+            stat_names[1] = 'AP .5'
+            
             stats[2] = _summarize(1, iouThr=.75, maxDets=self.params.maxDets[2])
+            stat_names[2] = 'AP .75'
+            
             stats[3] = _summarize(1, areaRng='small', maxDets=self.params.maxDets[2])
+            stat_names[3] = 'AP (S)'
+            
             stats[4] = _summarize(1, areaRng='medium', maxDets=self.params.maxDets[2])
+            stat_names[4] = 'AP (M)'
+            
             stats[5] = _summarize(1, areaRng='large', maxDets=self.params.maxDets[2])
+            stat_names[5] = 'AP (L)'
+            
             stats[6] = _summarize(0, maxDets=self.params.maxDets[0])
+            stat_names[6] = 'AR (maxDets={})'.format(self.params.maxDets[0])
+            
             stats[7] = _summarize(0, maxDets=self.params.maxDets[1])
+            stat_names[7] = 'AR (maxDets={})'.format(self.params.maxDets[1])
+            
             stats[8] = _summarize(0, maxDets=self.params.maxDets[2])
+            stat_names[8] = 'AR (maxDets={})'.format(self.params.maxDets[2])
+            
             stats[9] = _summarize(0, areaRng='small', maxDets=self.params.maxDets[2])
+            stat_names[9] = 'AR (S)'
+            
             stats[10] = _summarize(0, areaRng='medium', maxDets=self.params.maxDets[2])
+            stat_names[10] = 'AR (M)'
+            
             stats[11] = _summarize(0, areaRng='large', maxDets=self.params.maxDets[2])
-            return stats
+            stat_names[11] = 'AR (L)'
+            
+            return stats, stat_names
 
         def _summarizeKps_crowd():
             # Adapted from https://github.com/Jeff-sjtu/CrowdPose
@@ -1033,6 +1060,7 @@ class COCOeval:
             #   year={2018}
             # }
             stats = np.zeros((9,))
+            stat_names = [None] * stats.shape[0]
             stats[0] = _summarize(1, maxDets=20)
             stats[1] = _summarize(1, maxDets=20, iouThr=.5)
             stats[2] = _summarize(1, maxDets=20, iouThr=.75)
@@ -1053,27 +1081,48 @@ class COCOeval:
             stats[7] = type_result[1]
             stats[8] = type_result[2]
 
-            return stats
+            return stats, stat_names
 
         def _summarizeKps(eval=None):
             num_vis = len(self.gt_visibilities)
             stats = np.zeros((10 + num_vis,))
+            stat_names = [None] * stats.shape[0]
 
             stats[ 0] = _summarize(1, maxDets=20)
+            stat_names[ 0] = 'AP'
             
             for vi, v in enumerate(self.gt_visibilities):
-                stats[ 5+vi] = _summarize(1, maxDets=20, visibility=v)
+                stats[ 1+vi] = _summarize(1, maxDets=20, visibility=v)
+                stat_names[ 1+vi] = 'AP (v={:d})'.format(v)
             
-            stats[ 1] = _summarize(1, maxDets=20, iouThr=.5)
-            stats[ 2] = _summarize(1, maxDets=20, iouThr=.75)
-            stats[ 3] = _summarize(1, maxDets=20, areaRng='medium')
-            stats[ 4] = _summarize(1, maxDets=20, areaRng='large')
+            stats[ 1+num_vis] = _summarize(1, maxDets=20, iouThr=.5)
+            stat_names[ 1+num_vis] = 'AP .5'
+
+            stats[ 2+num_vis] = _summarize(1, maxDets=20, iouThr=.75)
+            stat_names[ 2+num_vis] = 'AP .75'
+            
+            stats[ 3+num_vis] = _summarize(1, maxDets=20, areaRng='medium')
+            stat_names[ 3+num_vis] = 'AP (M)'
+            
+            stats[ 4+num_vis] = _summarize(1, maxDets=20, areaRng='large')
+            stat_names[ 4+num_vis] = 'AP (L)'
+            
             stats[ 5+num_vis] = _summarize(0, maxDets=20)
+            stat_names[ 5+num_vis] = 'AR'
+            
             stats[ 6+num_vis] = _summarize(0, maxDets=20, iouThr=.5)
+            stat_names[ 6+num_vis] = 'AR .5'
+            
             stats[ 7+num_vis] = _summarize(0, maxDets=20, iouThr=.75)
+            stat_names[ 7+num_vis] = 'AR .75'
+            
             stats[ 8+num_vis] = _summarize(0, maxDets=20, areaRng='medium')
+            stat_names[ 8+num_vis] = 'AR (M)'
+            
             stats[ 9+num_vis] = _summarize(0, maxDets=20, areaRng='large')
-            return stats
+            stat_names[ 9+num_vis] = 'AR (L)'
+            
+            return stats, stat_names
 
         if not self.eval:
             raise Exception('Please run accumulate() first')
@@ -1085,7 +1134,7 @@ class COCOeval:
         elif 'keypoints' in iouType:
             summarize = _summarizeKps
         
-        self.stats = summarize()
+        self.stats, self.stats_names = summarize()
 
     def __str__(self):
         self.summarize()

@@ -594,8 +594,11 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             'AP', 'AP .5', 'AP .75', 'AP (M)', 'AP (L)', 'AR', 'AR .5',
             'AR .75', 'AR (M)', 'AR (L)'
         ]
+        stats_names = coco_eval.stats_names
 
         info_str = list(zip(stats_names, coco_eval.stats))
+
+        print(info_str)
 
         if return_wrong_images:
             return info_str, sorted_matches

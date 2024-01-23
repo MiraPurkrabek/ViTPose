@@ -80,6 +80,7 @@ class COCOeval:
             use_area=True,
             extended_oks=False,
             confidence_thr=1e-10,
+            alpha=None,
         ):
         '''
         Initialize CocoEval using coco APIs for gt and dt
@@ -117,9 +118,8 @@ class COCOeval:
         self.score_key = 'score'
 
         self.extended_oks = extended_oks
-        # self.gt_visibilities = [1, 2]    # Skip visibility level 0 as it is not evaluated
-        self.gt_visibilities = []
         self.confidence_thr = confidence_thr
+        self.alpha = alpha
 
     def _prepare(self):
         '''
@@ -143,10 +143,11 @@ class COCOeval:
         if p.iouType == 'segm':
             _toMask(gts, self.cocoGt)
             _toMask(dts, self.cocoDt)
-        # set ignore flag and score key
+
+        # Find all visibility levels that are present in the dataset
+        self.gt_visibilities = set()
+        visibilities_counts = defaultdict(int)
         for gt in gts:
-            gt['ignore'] = gt['ignore'] if 'ignore' in gt else 0
-            gt['ignore'] = 'iscrowd' in gt and gt['iscrowd']
             if 'keypoints' in p.iouType:
                 if p.iouType == 'keypoints_wholebody':
                     body_gt = gt['keypoints']
@@ -156,24 +157,19 @@ class COCOeval:
                     righthand_gt = gt['righthand_kpts']
                     wholebody_gt = body_gt + foot_gt + face_gt + lefthand_gt + righthand_gt
                     g = np.array(wholebody_gt)
-                    k = np.count_nonzero(g[2::3] > 0)
-                    self.score_key = 'wholebody_score'
+                    vis = g[2::3]
                 elif p.iouType == 'keypoints_foot':
                     g = np.array(gt['foot_kpts'])
-                    k = np.count_nonzero(g[2::3] > 0)
-                    self.score_key = 'foot_score'
+                    vis = g[2::3]
                 elif p.iouType == 'keypoints_face':
                     g = np.array(gt['face_kpts'])
-                    k = np.count_nonzero(g[2::3] > 0)
-                    self.score_key = 'face_score'
+                    vis = g[2::3]
                 elif p.iouType == 'keypoints_lefthand':
                     g = np.array(gt['lefthand_kpts'])
-                    k = np.count_nonzero(g[2::3] > 0)
-                    self.score_key = 'lefthand_score'
+                    vis = g[2::3]
                 elif p.iouType == 'keypoints_righthand':
                     g = np.array(gt['righthand_kpts'])
-                    k = np.count_nonzero(g[2::3] > 0)
-                    self.score_key = 'righthand_score'
+                    vis = g[2::3]
                 elif p.iouType == 'keypoints_crowd':
                     # 'num_keypoints' in CrowdPose dataset only counts
                     # the visible joints (vis = 2)
@@ -181,23 +177,76 @@ class COCOeval:
                     self.score_key = 'score'
                 else:
                     g = np.array(gt['keypoints'])
-                    k = np.count_nonzero(g[2::3] > 0)
-                    self.score_key = 'score'
-
-                gt['ignore'] = (k == 0) or gt['ignore']
-        self._gts = defaultdict(list)       # gt for evaluation
-        self._dts = defaultdict(list)       # dt for evaluation
-        self.gt_visibilities = set()
-        for gt in gts:
-            self._gts[gt['image_id'], gt['category_id']].append(gt)
-            if 'keypoints' in gt:
-                kpts = gt['keypoints']
-                vis = np.unique(kpts[2::3])
-                self.gt_visibilities.update(vis)
+                    vis = g[2::3]
+                unique_vis, vis_counts = np.unique(vis.astype(int), return_counts=True)
+                self.gt_visibilities.update(unique_vis)
+                for vis, count in zip(unique_vis, vis_counts):
+                    visibilities_counts[vis] += count
         self.gt_visibilities = sorted(list(self.gt_visibilities))
         self.gt_visibilities = [vis for vis in self.gt_visibilities if vis > 0]
-        print("Evaluating {:d} levels of visibility".format(len(self.gt_visibilities)+1))
+        # self.gt_visibilities = []
+        print("Evaluating {:d} levels of visibility: {}".format(len(self.gt_visibilities)+1, self.gt_visibilities))
+        all_kpts = np.array([count for _, count in visibilities_counts.items()]).sum()
+        for vis, count in visibilities_counts.items():
+            print("\tvisibility {:2d}: {:6d} ({:5.2f} %)".format(vis, count, count/all_kpts*100))
+        
+        _vis_conditions = [lambda x: x > 0]
+        for vis in self.gt_visibilities:
+            _vis_conditions.append(lambda x, vis=vis: x == vis)
 
+        # for each visibility level, set ignore flag and score key
+        for gt in gts:
+            gt_ignore = gt['ignore'] if 'ignore' in gt else 0
+            gt_ignore = 'iscrowd' in gt and gt['iscrowd']
+            gt['ignore'] = [gt_ignore for _ in range(len(self.gt_visibilities)+1)]
+            if 'keypoints' in p.iouType:
+                if p.iouType == 'keypoints_wholebody':
+                    body_gt = gt['keypoints']
+                    foot_gt = gt['foot_kpts']
+                    face_gt = gt['face_kpts']
+                    lefthand_gt = gt['lefthand_kpts']
+                    righthand_gt = gt['righthand_kpts']
+                    wholebody_gt = body_gt + foot_gt + face_gt + lefthand_gt + righthand_gt
+                    g = np.array(wholebody_gt)
+                    vis = g[2::3]
+                    self.score_key = 'wholebody_score'
+                elif p.iouType == 'keypoints_foot':
+                    g = np.array(gt['foot_kpts'])
+                    vis = g[2::3]
+                    self.score_key = 'foot_score'
+                elif p.iouType == 'keypoints_face':
+                    g = np.array(gt['face_kpts'])
+                    vis = g[2::3]
+                    self.score_key = 'face_score'
+                elif p.iouType == 'keypoints_lefthand':
+                    g = np.array(gt['lefthand_kpts'])
+                    vis = g[2::3]
+                    self.score_key = 'lefthand_score'
+                elif p.iouType == 'keypoints_righthand':
+                    g = np.array(gt['righthand_kpts'])
+                    vis = g[2::3]
+                    self.score_key = 'righthand_score'
+                elif p.iouType == 'keypoints_crowd':
+                    # 'num_keypoints' in CrowdPose dataset only counts
+                    # the visible joints (vis = 2)
+                    k = gt['num_keypoints']
+                    gt['ignore'] = [gt_ignore or k==2 for gt_ignore in gt["ignore"]]
+                    self.score_key = 'score'
+                else:
+                    g = np.array(gt['keypoints'])
+                    vis = g[2::3]
+                    self.score_key = 'score'
+
+                if p.iouType != 'keypoints_crowd':
+                    for i, gt_ig in enumerate(gt['ignore']):
+                        vis_cond = _vis_conditions[i]
+                        k = np.count_nonzero(vis_cond(vis))
+                        gt['ignore'][i] = gt_ig or (k == 0)
+        
+        self._gts = defaultdict(list)       # gt for evaluation
+        self._dts = defaultdict(list)       # dt for evaluation
+        for gt in gts:
+            self._gts[gt['image_id'], gt['category_id']].append(gt)
         flag_no_part_score = False
         for dt in dts:
             # ignore all-zero keypoints and check part score
@@ -280,16 +329,17 @@ class COCOeval:
         if self.extended_oks:
             print("Using extended OKS...")
 
-        self.ious = {(imgId, catId): computeIoU(imgId, catId, original= not self.extended_oks) \
+        self.ious = {(imgId, catId): computeIoU(imgId, catId, original= not self.extended_oks, alpha=self.alpha) \
                         for imgId in p.imgIds
                         for catId in catIds}
 
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
-        self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet,
+        self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet, iou_i=iou_i,
                                     #   return_matching=True, match_by_bbox=True
                                     )
                  for catId in catIds
+                 for iou_i in range(len(self.gt_visibilities)+1)
                  for areaRng in p.areaRng
                  for imgId in p.imgIds
              ]
@@ -301,9 +351,10 @@ class COCOeval:
                 1,
                 [0, 1e5**2],
                 maxDet,
+                iou_i=0,
                 return_matching=True,
                 match_by_bbox=True,
-            )[0]
+            )
             if img_eval is None or "assigned_pairs" not in img_eval:
                 continue
             self.matched_pairs.extend(img_eval['assigned_pairs'])
@@ -493,7 +544,8 @@ class COCOeval:
                 # print("OKS", np.sum(np.exp(-e)) / e.shape[0])
         return ious
     
-    def computeExtendedOks(self, imgId, catId, original=False):
+    def computeExtendedOks(self, imgId, catId, original=False, alpha=None):
+        
         p = self.params
         # dimention here should be Nxm
         gts = self._gts[imgId, catId]
@@ -507,6 +559,13 @@ class COCOeval:
         sigmas = self.sigmas
         vars = (sigmas * 2)**2
         k = len(sigmas)
+
+        if alpha is None:
+            alpha = (1 - np.exp(-1)) / (2 - np.exp(-1))
+        if original:
+            alpha = 0
+
+        assert alpha <= 1 and alpha >= 0, "Alpha is out of interval (0, 1)"
 
         # Prepare ious for each visibility level
         ious = [np.zeros((len(dts), len(gts))) for _ in self.gt_visibilities]
@@ -574,74 +633,65 @@ class COCOeval:
                 vd = d[2::3]
                 vd[vd < self.confidence_thr] = 0
                 vd[vd >= self.confidence_thr] = 1
+                vd = vd.astype(int)
                 
+                vis_level = -1
                 for iou, vis_mask in zip(ious, vis_masks):
+                    vis_level += 1
 
-                    if original:
-                        if np.count_nonzero(vis_mask)>0:
-                            # measure the per-keypoint distance if keypoints visible
-                            dx = xd - xg
-                            dy = yd - yg
-                        else:
-                            # measure minimum distance to keypoints in (x0,y0) & (x1,y1)
+                    k1 = np.count_nonzero(vis_mask)
+                    gt_ignore = gt['ignore'][vis_level]
+
+                    if gt_ignore or k1 <= 0:
+                        
+                        if original:
+                            # Reproduce behavior of the original OKS
                             z = np.zeros((k))
                             dx = np.max((z, x0-xd),axis=0)+np.max((z, xd-x1),axis=0)
                             dy = np.max((z, y0-yd),axis=0)+np.max((z, yd-y1),axis=0)
-                    
-                    else:
-                        # Initialize the distance with zeros
-                        dx = np.zeros((k))
-                        dy = np.zeros((k))
 
-                        # Compute distance when both GT and pred is visible 
-                        in_mask = np.logical_and(
-                            vg > 0,
-                            vg <=2,
-                        )
-                        in_mask = np.logical_and(in_mask, vd > 0)
-                        in_mask = np.logical_and(in_mask, vis_mask)
-                        if np.count_nonzero(in_mask) > 0:
-                            dx[in_mask] = xd[in_mask] - xg[in_mask]
-                            dy[in_mask] = yd[in_mask] - yg[in_mask]
-                        
-                        # Compute distance when GT is not visible but pred is visible
-                        out_mask = np.logical_and(
-                            vg > 2,
-                            vd > 0,
-                        )
-                        out_mask = np.logical_and(out_mask, vis_mask)
-                        if np.count_nonzero(out_mask) > 0:
-                            xd[out_mask] = np.clip(xd[out_mask], x0, x1)
-                            yd[out_mask] = np.clip(yd[out_mask], y0, y1)
-                            dx[out_mask] = np.maximum(xd[out_mask] - x0, x1 - xd[out_mask])
-                            dy[out_mask] = np.maximum(yd[out_mask] - y0, y1 - yd[out_mask])
+                            vis_oks = 1             # Will be ignored as alpha=0
+                        else:
+                            # Set similarity to -1 as it will be ignored in the matching phase
+                            iou[i, j] = -1
+                            continue
 
-                        # Compute distance when GT is visible but pred is not visible
-                        miss_mask = np.logical_and(
-                            vg > 0,
-                            vg <= 2,
-                        )
-                        miss_mask = np.logical_and(miss_mask, vd == 0)
-                        miss_mask = np.logical_and(miss_mask, vis_mask)
-                        if np.count_nonzero(miss_mask) > 0:
-                            xg[miss_mask] = np.clip(xg[miss_mask], x0, x1)
-                            yg[miss_mask] = np.clip(yg[miss_mask], y0, y1)
-                            dx[miss_mask] = np.maximum(xg[miss_mask] - x0, x1 - xg[miss_mask])
-                            dy[miss_mask] = np.maximum(yg[miss_mask] - y0, y1 - yg[miss_mask])
-                    
+                    else:   
+                        # Mask out keypoints that are not visible for this visibility level
+                        vd_i = vd[vis_mask]
+                        vg_i = vg[vis_mask]
+                        # Only kpts with label 2 are visible
+                        vg_i = (vg_i == 2).astype(int)
+
+                        # measure the per-keypoint distance if keypoints visible
+                        dx = xd - xg
+                        dy = yd - yg
+
+                        # Compute visibility distance and similarity
+                        dv = (vd_i == vg_i)
+                        vis_oks = np.sum(dv) / dv.shape[0]
+                        vis_oks = 1
+
+                    # Transform location distance to similarity    
                     if self.use_area:
                         e = (dx**2 + dy**2) / vars / (gt['area']+np.spacing(1)) / 2
                     else:
                         tmparea = gt['bbox'][3] * gt['bbox'][2] * 0.53
                         e = (dx**2 + dy**2) / vars / (tmparea+np.spacing(1)) / 2
 
-                    if np.count_nonzero(vis_mask) > 0:
+                    # Mask out keypoints that are not visible for this visibility level
+                    if k1 > 0:
                         e=e[vis_mask]
-                    iou[i, j] = np.sum(np.exp(-e)) / e.shape[0]
-        
+                    
+                    # Compute location similarity
+                    loc_oks = np.sum(np.exp(-e)) / e.shape[0]
+                    
+                    # Compute extended OKS
+                    iou[i, j] = (1-alpha) * loc_oks + alpha * vis_oks
+
         return ious
 
-    def evaluateImg(self, imgId, catId, aRng, maxDet, return_matching=False, match_by_bbox=False):
+    def evaluateImg(self, imgId, catId, aRng, maxDet, iou_i=0, return_matching=False, match_by_bbox=False):
         '''
         perform evaluation for single category and image
         :return: dict (single image results)
@@ -659,14 +709,14 @@ class COCOeval:
             gt = [_ for cId in p.catIds for _ in self._gts[imgId,cId]]
             dt = [_ for cId in p.catIds for _ in self._dts[imgId,cId]]
         if len(gt) == 0 and len(dt) ==0:
-            return [None for _ in range(len(self.gt_visibilities)+1)]
+            return None
         
         for g in gt:
             if 'area' not in g or not self.use_area:
                 tmp_area = g['bbox'][2] * g['bbox'][3] * 0.53
             else:
                 tmp_area =g['area']
-            if g['ignore'] or (tmp_area < aRng[0] or tmp_area > aRng[1]):
+            if g['ignore'][iou_i] or (tmp_area < aRng[0] or tmp_area > aRng[1]):
                 g['_ignore'] = 1
             else:
                 g['_ignore'] = 0
@@ -705,7 +755,7 @@ class COCOeval:
                         g_bbox = np.array(g["bbox"])
                         g_center = g_bbox[:2] + g_bbox[2:] / 2
                         if np.allclose(d_center, g_center):
-                            iou = ious[0][dind, gind] if not g["ignore"] else np.nan
+                            iou = ious[iou_i][dind, gind] if not g["ignore"][iou_i] else np.nan
                             assigned_pairs.append((d, g, iou))
                             dtIg[tind, dind] = gtIg[gind]
                             dtm[tind, dind]  = gt[gind]['id']
@@ -714,7 +764,7 @@ class COCOeval:
             # set unmatched detections outside of area range to ignore
             a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
             dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
-            image_results = [{
+            image_results = {
                 'image_id':             imgId,
                 'category_id':          catId,
                 'aRng':                 aRng,
@@ -728,66 +778,65 @@ class COCOeval:
                 'gtIgnore':             gtIg,
                 'dtIgnore':             dtIg,
                 'gtIndices':            gtind,
-            }]
+            }
         
         else:
-            image_results = []
-            for iou in ious:
-                gtm = np.ones((T, G), dtype=np.int64) * -1
-                dtm = np.ones((T, D), dtype=np.int64) * -1
-                gtIg = np.array([g['_ignore'] for g in gt])
-                dtIg = np.zeros((T,D))
-                assigned_pairs = []
-                if len(iou):            
-                    for tind, t in enumerate(iouThrs):
-                        
-                        for dind, d in enumerate(dt):
-                            # information about best match so far (m=-1 -> unmatched)
-                            curr_iou = min([t,1-1e-10])
-                            m   = -1
-                            for gind, g in enumerate(gt):
-                                # if this gt already matched, and not a crowd, continue
-                                if gtm[tind,gind] >= 0 and not iscrowd[gind]:
-                                    continue
-                                # if dt matched to reg gt, and on ignore gt, stop
-                                # since all the rest of g's are ignored as well because of the prior sorting
-                                if m > -1 and gtIg[m] == 0 and gtIg[gind] == 1:
-                                    break
-                                # continue to next gt unless better match made
-                                if iou[dind,gind] < curr_iou:
-                                    continue
-                                # if match successful and best so far, store appropriately
-                                curr_iou = iou[dind,gind]
-                                m = gind
-                            
-                            if return_matching and not match_by_bbox:
-                                assigned_pairs.append((d, gt[m], curr_iou if (m != -1 and gtIg[m] != 1) else np.nan))
-                            
-                            if m == -1:
+            iou = ious[iou_i]
+            gtm = np.ones((T, G), dtype=np.int64) * -1
+            dtm = np.ones((T, D), dtype=np.int64) * -1
+            gtIg = np.array([g['_ignore'] for g in gt])
+            dtIg = np.zeros((T,D))
+            assigned_pairs = []
+            if len(iou):            
+                for tind, t in enumerate(iouThrs):
+                    
+                    for dind, d in enumerate(dt):
+                        # information about best match so far (m=-1 -> unmatched)
+                        curr_iou = min([t,1-1e-10])
+                        m   = -1
+                        for gind, g in enumerate(gt):
+                            # if this gt already matched, and not a crowd, continue
+                            if gtm[tind,gind] >= 0 and not iscrowd[gind]:
                                 continue
-                            # if match made store id of match for both dt and gt
-                            dtIg[tind, dind] = gtIg[m]
-                            dtm[tind, dind]  = gt[m]['id']
-                            gtm[tind, m]     = d['id']
-                # set unmatched detections outside of area range to ignore
-                a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
-                dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
-                # store results for given image and category
-                image_results.append({
-                    'image_id':             imgId,
-                    'category_id':          catId,
-                    'aRng':                 aRng,
-                    'maxDet':               maxDet,
-                    'dtIds':                [d['id'] for d in dt],
-                    'gtIds':                [g['id'] for g in gt],
-                    'dtMatches':            dtm,
-                    'gtMatches':            gtm,
-                    'assigned_pairs':       assigned_pairs,
-                    'dtScores':             [d[self.score_key] for d in dt],
-                    'gtIgnore':             gtIg,
-                    'dtIgnore':             dtIg,
-                    'gtIndices':            gtind,
-                })
+                            # if dt matched to reg gt, and on ignore gt, stop
+                            # since all the rest of g's are ignored as well because of the prior sorting
+                            if m > -1 and gtIg[m] == 0 and gtIg[gind] == 1:
+                                break
+                            # continue to next gt unless better match made
+                            if iou[dind,gind] < curr_iou:
+                                continue
+                            # if match successful and best so far, store appropriately
+                            curr_iou = iou[dind,gind]
+                            m = gind
+                        
+                        if return_matching and not match_by_bbox:
+                            assigned_pairs.append((d, gt[m], curr_iou if (m != -1 and gtIg[m] != 1) else np.nan))
+                        
+                        if m == -1:
+                            continue
+                        # if match made store id of match for both dt and gt
+                        dtIg[tind, dind] = gtIg[m]
+                        dtm[tind, dind]  = gt[m]['id']
+                        gtm[tind, m]     = d['id']
+            # set unmatched detections outside of area range to ignore
+            a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
+            dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
+            # store results for given image and category
+            image_results = {
+                'image_id':             imgId,
+                'category_id':          catId,
+                'aRng':                 aRng,
+                'maxDet':               maxDet,
+                'dtIds':                [d['id'] for d in dt],
+                'gtIds':                [g['id'] for g in gt],
+                'dtMatches':            dtm,
+                'gtMatches':            gtm,
+                'assigned_pairs':       assigned_pairs,
+                'dtScores':             [d[self.score_key] for d in dt],
+                'gtIgnore':             gtIg,
+                'dtIgnore':             dtIg,
+                'gtIndices':            gtind,
+            }
         
         return image_results
 
@@ -834,12 +883,13 @@ class COCOeval:
         counter = 0
         
         for k, k0 in enumerate(k_list):
-            Nk = k0*A0*I0
+            Nk = k0*A0*I0*V
             for v in range(V):
+                Nv = v*A0*I0
                 for a, a0 in enumerate(a_list):
                     Na = a0*I0
                     for m, maxDet in enumerate(m_list):
-                        E = [self.evalImgs[Nk + Na + i][v] for i in i_list]
+                        E = [self.evalImgs[Nk + Nv + Na + i] for i in i_list]
                         E = [e for e in E if not e is None]
                         if len(E) == 0:
                             continue
@@ -930,7 +980,7 @@ class COCOeval:
             v = 0 if visibility is None else self.gt_visibilities.index(visibility) + 1
             
             if v > 0:
-                visStr = '[{:d}]'.format(v)
+                visStr = '[{:d}]'.format(int(visibility))
             elif self.extended_oks:
                 visStr = '[>0]'
             else:

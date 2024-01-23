@@ -578,9 +578,9 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             self.coco,
             coco_det,
             'keypoints',
-            self.sigmas,                # Commented out in the original
-            extended_oks=True,          # Commented out in the original
-            confidence_thr=0.3          # Commented out in the original
+            # self.sigmas,                # Commented out in the original
+            # extended_oks=True,          # Commented out in the original
+            # confidence_thr=0.3          # Commented out in the original
         )
         coco_eval.params.useSegm = None
         coco_eval.evaluate()

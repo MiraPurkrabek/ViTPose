@@ -122,6 +122,10 @@ class COCOeval:
         self.confidence_thr = confidence_thr
         self.alpha = alpha
 
+        self.loc_similarities = []
+        self.vis_similarities = []
+        self.conf_similarities = []
+
     def _prepare(self):
         '''
         Prepare ._gts and ._dts for evaluation based on params
@@ -195,7 +199,7 @@ class COCOeval:
         for vis in self.gt_visibilities:
             _vis_conditions.append(lambda x, vis=vis: x == vis)
 
-        # for each visibility level, set ignore flag and score key
+        # for each visibility level, set ignore flag, visibility vector and score key
         for gt in gts:
             gt_ignore = gt['ignore'] if 'ignore' in gt else 0
             gt_ignore = 'iscrowd' in gt and gt['iscrowd']
@@ -208,24 +212,24 @@ class COCOeval:
                     lefthand_gt = gt['lefthand_kpts']
                     righthand_gt = gt['righthand_kpts']
                     wholebody_gt = body_gt + foot_gt + face_gt + lefthand_gt + righthand_gt
-                    g = np.array(wholebody_gt)
-                    vis = g[2::3]
+                    kpts = np.array(wholebody_gt)
+                    vis = kpts[2::3]
                     self.score_key = 'wholebody_score'
                 elif p.iouType == 'keypoints_foot':
-                    g = np.array(gt['foot_kpts'])
-                    vis = g[2::3]
+                    kpts = np.array(gt['foot_kpts'])
+                    vis = kpts[2::3]
                     self.score_key = 'foot_score'
                 elif p.iouType == 'keypoints_face':
-                    g = np.array(gt['face_kpts'])
-                    vis = g[2::3]
+                    kpts = np.array(gt['face_kpts'])
+                    vis = kpts[2::3]
                     self.score_key = 'face_score'
                 elif p.iouType == 'keypoints_lefthand':
-                    g = np.array(gt['lefthand_kpts'])
-                    vis = g[2::3]
+                    kpts = np.array(gt['lefthand_kpts'])
+                    vis = kpts[2::3]
                     self.score_key = 'lefthand_score'
                 elif p.iouType == 'keypoints_righthand':
-                    g = np.array(gt['righthand_kpts'])
-                    vis = g[2::3]
+                    kpts = np.array(gt['righthand_kpts'])
+                    vis = kpts[2::3]
                     self.score_key = 'righthand_score'
                 elif p.iouType == 'keypoints_crowd':
                     # 'num_keypoints' in CrowdPose dataset only counts
@@ -234,11 +238,11 @@ class COCOeval:
                     gt['ignore'] = [gt_ignore or k==2 for gt_ignore in gt["ignore"]]
                     self.score_key = 'score'
                 else:
-                    g = np.array(gt['keypoints'])
-                    vis = g[2::3]
+                    kpts = np.array(gt['keypoints'])
+                    vis = kpts[2::3]
                     self.score_key = 'score'
-
-                if p.iouType != 'keypoints_crowd':
+                
+                if p.iouType != 'keypoints_crowd':                    
                     for i, gt_ig in enumerate(gt['ignore']):
                         vis_cond = _vis_conditions[i]
                         k = np.count_nonzero(vis_cond(vis))
@@ -291,6 +295,11 @@ class COCOeval:
                 else:
                     d = np.array(dt['keypoints'])
                     k = np.count_nonzero(d[2::3] > 0)
+
+                if not 'visibilities' in dt:
+                    # When visibility is not predicted, take confidence as visibility
+                    dt['visibilities'] = d[2::3]
+
                 if k == 0:
                     continue
             self._dts[dt['image_id'], dt['category_id']].append(dt)
@@ -333,6 +342,14 @@ class COCOeval:
         self.ious = {(imgId, catId): computeIoU(imgId, catId, original= not self.extended_oks, alpha=self.alpha) \
                         for imgId in p.imgIds
                         for catId in catIds}
+        
+        self.loc_similarities = np.array(self.loc_similarities)
+        self.vis_similarities = np.array(self.vis_similarities)
+        self.conf_similarities = np.array(self.conf_similarities)
+
+        print("Loc similarity: {:.4f}".format(self.loc_similarities.mean()))
+        print("Vis similarity: {:.4f}".format(self.vis_similarities.mean()))
+        print("Conf similarity: {:.4f}".format(self.conf_similarities.mean()))
 
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
@@ -545,8 +562,10 @@ class COCOeval:
                 # print("OKS", np.sum(np.exp(-e)) / e.shape[0])
         return ious
     
-    def computeExtendedOks(self, imgId, catId, original=False, alpha=None):
+    def computeExtendedOks(self, imgId, catId, original=False, alpha=None, beta=None):
         
+
+
         p = self.params
         # dimention here should be Nxm
         gts = self._gts[imgId, catId]
@@ -562,11 +581,16 @@ class COCOeval:
         k = len(sigmas)
 
         if alpha is None:
-            alpha = (1 - np.exp(-1)) / (2 - np.exp(-1))
+            alpha = 0.5 * (1 - np.exp(-1)) / (2 - np.exp(-1))
+        if beta is None:
+            beta = 0.5 * (1 - np.exp(-1)) / (2 - np.exp(-1))
         if original:
             alpha = 0
+            beta = 0
 
         assert alpha <= 1 and alpha >= 0, "Alpha is out of interval (0, 1)"
+        assert beta <= 1 and beta >= 0, "Beta is out of interval (0, 1)"
+        assert alpha + beta <= 1, "Sum of alpha and beta is greater than 1"
 
         # Prepare ious for each visibility level
         ious = [np.zeros((len(dts), len(gts))) for _ in self.gt_visibilities]
@@ -597,6 +621,7 @@ class COCOeval:
                 g = np.array(gt['keypoints'])
 
             xg = g[0::3]; yg = g[1::3]; vg = g[2::3]
+            gt_in_img = vg < 3      # Visibility 3 means the keypoint is out of image
             
             # Count the number of keypoints visible for each visibility level
             vis_masks = [vg == vis for vis in self.gt_visibilities]
@@ -631,64 +656,107 @@ class COCOeval:
                     d = np.array(dt['keypoints'])
 
                 xd = d[0::3]; yd = d[1::3]
-                vd = d[2::3]
-                vd[vd < self.confidence_thr] = 0
-                vd[vd >= self.confidence_thr] = 1
-                vd = vd.astype(int)
+                cd = d[2::3]
+                # cd[cd < self.confidence_thr] = 0
+                # cd[cd >= self.confidence_thr] = 1
+                # cd = cd.astype(int)
+                vd = np.array(dt['visibilities'])
+                
+                # vd[vd < self.confidence_thr] = 0
+                # vd[vd >= self.confidence_thr] = 1
+                # vd = vd.astype(int)
+
+                # GT visibility is 0/1
+                vg = (vg == 2).astype(int)
                 
                 vis_level = -1
                 for iou, vis_mask in zip(ious, vis_masks):
                     vis_level += 1
+                    alpha_i = alpha
+                    beta_i = beta
 
                     k1 = np.count_nonzero(vis_mask)
                     gt_ignore = gt['ignore'][vis_level]
 
-                    if gt_ignore or k1 <= 0:
-                        
-                        if original:
-                            # Reproduce behavior of the original OKS
-                            z = np.zeros((k))
-                            dx = np.max((z, x0-xd),axis=0)+np.max((z, xd-x1),axis=0)
-                            dy = np.max((z, y0-yd),axis=0)+np.max((z, yd-y1),axis=0)
+                    if gt_ignore and not original:
+                        iou[i, j] = 0
+                        continue
 
-                            vis_oks = 1             # Will be ignored as alpha=0
-                        else:
-                            # Set similarity to -1 as it will be ignored in the matching phase
-                            iou[i, j] = -1
-                            continue
+                    assert not (gt_ignore and k1 < 0), "k1 is negative but gt is not ignored"
 
-                    else:   
-                        # Mask out keypoints that are not visible for this visibility level
-                        vd_i = vd[vis_mask]
+                    ###############################
+                    # Compute visibility similarity
+                    if k1 > 0:
                         vg_i = vg[vis_mask]
-                        # Only kpts with label 2 are visible
-                        vg_i = (vg_i == 2).astype(int)
+                        vd_i = vd[vis_mask]
+                        dist_v = abs(vd_i - vg_i)
+                        vis_oks = 1 - np.sum(dist_v) / dist_v.shape[0]
+                    else:
+                        vis_oks = 1.0
+                        alpha = 0.0
+                    
+                    ###############################
+                    # Compute confidence similarity
+                    if k1 > 0:
+                        cg_i = gt_in_img[vis_mask].astype(int)
+                        cd_i = cd[vis_mask]
+                        dist_c = abs(cd_i - cg_i)
+                        conf_oks = 1 - np.sum(dist_c) / dist_c.shape[0]
+                        # print()
+                        # print("conf_oks", conf_oks)
+                        # print("cg", cg_i)
+                        # print("cd", cd_i)
+                        # print("dist", dist_c)
 
-                        # measure the per-keypoint distance if keypoints visible
+                        if np.all(cg_i == 0):
+                            # If all keypoints are outside the image,
+                            # ignore visibility and location similarity
+                            beta_i = 1.0
+                            alpha_i = 0.0
+                            # print("Everything is outside the image!")
+
+                    else:
+                        conf_oks = 1.0
+                        beta = 0.0
+
+                    ###############################
+                    # Compute location similarity
+                    if k1 > 0:
                         dx = xd - xg
                         dy = yd - yg
+                    else:
+                        z = np.zeros((k))
+                        dx = np.max((z, x0-xd),axis=0)+np.max((z, xd-x1),axis=0)
+                        dy = np.max((z, y0-yd),axis=0)+np.max((z, yd-y1),axis=0)
 
-                        # Compute visibility distance and similarity
-                        dv = (vd_i == vg_i)
-                        vis_oks = np.sum(dv) / dv.shape[0]
-                        vis_oks = 1
-
-                    # Transform location distance to similarity    
+                    dist_l = dx**2 + dy**2
                     if self.use_area:
-                        e = (dx**2 + dy**2) / vars / (gt['area']+np.spacing(1)) / 2
+                        e = (dist_l) / vars / (gt['area']+np.spacing(1)) / 2
                     else:
                         tmparea = gt['bbox'][3] * gt['bbox'][2] * 0.53
-                        e = (dx**2 + dy**2) / vars / (tmparea+np.spacing(1)) / 2
-
-                    # Mask out keypoints that are not visible for this visibility level
+                        e = (dist_l) / vars / (tmparea+np.spacing(1)) / 2
                     if k1 > 0:
                         e=e[vis_mask]
-                    
-                    # Compute location similarity
                     loc_oks = np.sum(np.exp(-e)) / e.shape[0]
-                    
+
+                    ###############################
                     # Compute extended OKS
-                    iou[i, j] = (1-alpha) * loc_oks + alpha * vis_oks
+                    iou[i, j] = (
+                        (1-alpha_i-beta_i) * loc_oks +
+                        alpha_i * vis_oks +
+                        beta_i * conf_oks
+                    )
+
+                    self.loc_similarities.append(loc_oks)# * (1-alpha_i-beta_i))
+                    self.vis_similarities.append(vis_oks)# * alpha_i)
+                    self.conf_similarities.append(conf_oks)# * beta_i)
+
+                    # print("(loc) {:.2f} * {:.2f}\t+\t(vis) {:.2f} * {:.2f}\t+\t(conf) {:.2f} * {:.2f} \t=\t{:.2f}".format(
+                    #     (1-alpha_i-beta_i), loc_oks,
+                    #     alpha_i, vis_oks,
+                    #     beta_i, conf_oks,
+                    #     iou[i, j],
+                    # ))
 
         return ious
 

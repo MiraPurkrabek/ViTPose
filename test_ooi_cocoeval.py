@@ -11,13 +11,14 @@ gt = COCO(
 pred = gt.loadRes(
     # '/datagrid/personal/purkrmir/ViTPose/coco_test/vanilla_OCHuman.json',
     '/datagrid/personal/purkrmir/ViTPose/coco_test/vanilla_COCO.json',
+    # '/datagrid/personal/purkrmir/ViTPose/coco_test/base_COCO.json',
+    # '/datagrid/personal/purkrmir/ViTPose/coco_test/huge_COCO.json',
     # '/datagrid/personal/purkrmir/data/COCO/original/tmp_annotations/person_keypoints_val2017_pred.json',
 )
 
 coco_eval = COCOeval(gt, pred, 'keypoints', extended_oks=True, alpha=None)
 coco_eval.evaluate()
 coco_eval.accumulate()
-ret = coco_eval.summarize()
+coco_eval.summarize()
 
-print(ret)
     

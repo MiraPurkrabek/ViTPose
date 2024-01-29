@@ -16,7 +16,7 @@ pred = gt.loadRes(
     # '/datagrid/personal/purkrmir/data/COCO/original/tmp_annotations/person_keypoints_val2017_pred.json',
 )
 
-coco_eval = COCOeval(gt, pred, 'keypoints', extended_oks=True, alpha=None)
+coco_eval = COCOeval(gt, pred, 'keypoints', extended_oks=True, alpha=None, confidence_thr=1e-10)
 coco_eval.evaluate()
 coco_eval.accumulate()
 coco_eval.summarize()

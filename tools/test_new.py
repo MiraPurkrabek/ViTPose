@@ -241,6 +241,8 @@ def main():
             "test_visualization",
             config_name,
         )
+        # Prepare datastructure
+        shutil.rmtree(save_dir, ignore_errors=True)
         os.makedirs(save_dir, exist_ok=True)
         
         heatmaps = np.concatenate([o["output_heatmap"] for o in outputs], axis=0)
@@ -253,7 +255,7 @@ def main():
         plt.hist(heatmaps.flatten(), bins=100, log=True)
         plt.title("Heatmaps histogram (log scale)")
         plt.grid(True)
-        plt.savefig(osp.join(save_dir, "..", "test_heatmap_histogram.png"))
+        plt.savefig(osp.join(save_dir, "test_heatmap_histogram.png"))
         plt.cla()
 
         print("+"*10)
@@ -265,7 +267,8 @@ def main():
         plt.hist(kpts_sums.flatten(), bins=100)
         plt.title("Heatmaps sum histogram")
         plt.grid(True)
-        plt.savefig(osp.join(save_dir, "..", "test_heatmap_sum_histogram.png"))
+        plt.savefig(osp.join(save_dir, "test_heatmap_sum_histogram.png"))
+        plt.cla()
 
         print("="*20)
 
@@ -281,10 +284,6 @@ def main():
         print("Number of sorted matches:", len(sorted_matches))
         oks_list = np.array([m[2] for m in sorted_matches])
         print("Dataset evaluated")
-
-        # Prepare datastructure
-        shutil.rmtree(save_dir, ignore_errors=True)
-        os.makedirs(save_dir, exist_ok=True)
 
         # Try to load dict with views
         views_dict_path = os.path.join(cfg.data_root, "annotations", "views.json")
@@ -316,6 +315,7 @@ def main():
         hist_oks_score = np.clip(oks_list, 0, 1)
         plt.hist(hist_oks_score, bins=100)
         plt.savefig(os.path.join(save_dir, "test_score_histogram.png"))
+        plt.cla()
 
         if not hasattr(dataset, "coco"):
             ann_dict = json.load(open("/datagrid/personal/purkrmir/data/MPII/annotations/_mpii_trainval_custom.json", "r"))

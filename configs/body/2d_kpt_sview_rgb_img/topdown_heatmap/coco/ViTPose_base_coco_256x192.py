@@ -1,6 +1,6 @@
-# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq2"
-COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/COCO-like/"
+# COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/COCO-like/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_TB_benchmark/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/Infants/Infants_benchmark/"
 

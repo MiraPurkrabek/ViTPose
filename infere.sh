@@ -3,7 +3,7 @@
 # IN_DATA="../data/FACIS/NSFW_benchmark/"
 # IN_DATA="../data/pose_experiments/MMA/"
 # IN_DATA="../data/Contortionists/"
-IN_DATA="../data/Infants/anonymization/grant_request/"
+# IN_DATA="../data/Infants/anonymization/grant_request/"
 # IN_DATA="../data/BOTTOM_VIEW_dataset/PoleVaultDuplantis_cut_frames_10fps/"
 # IN_DATA="../smplx/sampled_poses/distance_2.0_simplicity_3.0_view_TOP_rotation_000/"
 # IN_DATA="../data/OCHuman/tiny/"

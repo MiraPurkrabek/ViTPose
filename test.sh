@@ -13,6 +13,7 @@ WEIGHTS="models/pretrained/vitpose-s.pth"
 
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_vis2_only/best_AP_epoch_206.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_retrain/best_AP_epoch_205.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_retrain_ExOKS/best_AP_epoch_197.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_vis12/best_AP_epoch_206.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_force_zeros/best_AP_epoch_210.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_force_zeros_when_known/best_AP_epoch_209.pth"

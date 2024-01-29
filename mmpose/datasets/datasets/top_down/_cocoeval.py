@@ -8,6 +8,12 @@ import sys
 import warnings
 
 
+def BCE(prediction, label):
+    """Binary Cross Entropy"""
+    prediction = np.clip(prediction, 1e-10, 1 - 1e-10)
+    label = np.clip(label, 1e-10, 1 - 1e-10)
+    return -label * np.log(prediction) - (1 - label) * np.log(1 - prediction)
+
 class NullWriter(object):
 
     def write(self, arg):
@@ -79,7 +85,7 @@ class COCOeval:
             sigmas=None,
             use_area=True,
             extended_oks=False,
-            confidence_thr=1e-10,
+            confidence_thr=None,
             alpha=None,
         ):
         '''
@@ -657,9 +663,10 @@ class COCOeval:
 
                 xd = d[0::3]; yd = d[1::3]
                 cd = d[2::3]
-                # cd[cd < self.confidence_thr] = 0
-                # cd[cd >= self.confidence_thr] = 1
-                # cd = cd.astype(int)
+                if self.confidence_thr is not None:
+                    cd[cd < self.confidence_thr] = 0
+                    cd[cd >= self.confidence_thr] = 1
+                    cd = cd.astype(int)
                 vd = np.array(dt['visibilities'])
                 
                 # vd[vd < self.confidence_thr] = 0
@@ -700,6 +707,13 @@ class COCOeval:
                     if k1 > 0:
                         cg_i = gt_in_img[vis_mask].astype(int)
                         cd_i = cd[vis_mask]
+                        # inverted_bce = 1 / ( 1+ (BCE(cd_i, cg_i)))
+                        # conf_oks = np.sum(inverted_bce) / inverted_bce.shape[0]
+                        # print()
+                        # print(cd_i)
+                        # print(cg_i)
+                        # print(BCE(cd_i, cg_i))
+                        # print(inverted_bce)
                         dist_c = abs(cd_i - cg_i)
                         conf_oks = 1 - np.sum(dist_c) / dist_c.shape[0]
                         # print()

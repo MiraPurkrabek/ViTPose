@@ -140,20 +140,30 @@ def visualize_annotation(annotation, image_path):
                 bbox_w_aspect[0], center[1]-bbox[3]/2,
                 new_scale[0], bbox[3]
             ]).astype(int)
-    
+
+    new_bbox_43_c, new_bbox_43_s = bbox_xywh2cs(new_bbox, 3/4, 1.0)
+    new_bbox_43 = np.array([
+        new_bbox_43_c[0] - new_bbox_43_s[0]/2, new_bbox_43_c[1] - new_bbox_43_s[1]/2,
+        new_bbox_43_c[0] + new_bbox_43_s[0]/2, new_bbox_43_c[1] + new_bbox_43_s[1]/2
+    ]).astype(int)
+
     new_ex_center, new_ex_scale = bbox_xywh2cs(new_bbox, 3/4, 1.25)
     new_extended_bbox = np.array([
         new_ex_center[0] - new_ex_scale[0]/2, new_ex_center[1] - new_ex_scale[1]/2,
         new_ex_center[0] + new_ex_scale[0]/2, new_ex_center[1] + new_ex_scale[1]/2
     ]).astype(int)
 
+
+
     new_bbox[2:] += new_bbox[:2]
     bbox[2:] += bbox[:2]
+
     cv2.rectangle(image, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (255, 0, 0), 1)
     cv2.rectangle(image, (bbox_w_aspect[0], bbox_w_aspect[1]), (bbox_w_aspect[2], bbox_w_aspect[3]), (255, 255, 0), 1)
     cv2.rectangle(image, (extended_bbox[0], extended_bbox[1]), (extended_bbox[2], extended_bbox[3]), (0, 0, 255), 1)
     cv2.rectangle(image, (new_bbox[0], new_bbox[1]), (new_bbox[2], new_bbox[3]), (0, 255, 0), 1)
     cv2.rectangle(image, (new_extended_bbox[0], new_extended_bbox[1]), (new_extended_bbox[2], new_extended_bbox[3]), (0, 255, 255), 1)
+    cv2.rectangle(image, (new_bbox_43[0], new_bbox_43[1]), (new_bbox_43[2], new_bbox_43[3]), (255, 0, 255), 1)
 
     in_original = in_bbox(kpts, extended_bbox, bbox_format="xyxy")
     in_new = in_bbox(kpts, new_extended_bbox, bbox_format="xyxy")

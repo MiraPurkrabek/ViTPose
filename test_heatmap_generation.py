@@ -48,9 +48,10 @@ def test_generate_target(input_data, save_dir="TargetTest", show=True):
 
 if __name__ == "__main__":
     
-    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_blackout.py")
+    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_reproduce.py")
     dataset = build_dataset(cfg.data.train)
-    results = dataset[np.random.randint(0, len(dataset))]
+    for _ in range(10):
+        results = dataset[np.random.randint(0, len(dataset))]
     target = results["target"]
     # visibilities = results["joints_3d_visible"]
     target_weight = results["target_weight"]

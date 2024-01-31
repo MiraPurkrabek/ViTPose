@@ -233,6 +233,7 @@ class RandomBlackMask:
 
         return results
 
+
 @PIPELINES.register_module()
 class TopDownAffine:
     """Affine transform the image to make input.
@@ -573,7 +574,10 @@ class TopDownGenerateTarget:
                 x0 += mu_x_ac - mu_x
                 y0 += mu_y_ac - mu_y
                 g = np.exp(-((x - x0)**2 + (y - y0)**2) / (2 * factor**2))
-
+                
+                if normalize:
+                    g /= 2 * np.pi * factor**2
+                
                 # Usable gaussian range
                 g_x = max(0, -ul[0]), min(br[0], heatmap_size[0]) - ul[0]
                 g_y = max(0, -ul[1]), min(br[1], heatmap_size[1]) - ul[1]
@@ -587,10 +591,6 @@ class TopDownGenerateTarget:
                     target[joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
                         g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
                     
-                    if normalize:
-                        target[joint_id] -= np.min(target[joint_id])
-                        if np.max(target[joint_id]) > 0:
-                            target[joint_id] /= np.max(target[joint_id])
 
         elif target_type.lower() == 'CombinedTarget'.lower():
             target = np.zeros(

@@ -86,7 +86,18 @@ def main():
 
         for tensor_name in ['keypoint_head.final_layer.weight', 'keypoint_head.final_layer.bias']:
             new_ckpt['state_dict'][tensor_name] = new_ckpt['state_dict'][tensor_name][:num_keypoints[i]]
-
+        
+        # remove unnecessary part in the state dict
+        for j in range(5):
+            # remove associate part
+            for tensor_name in weight_names:
+                new_ckpt['state_dict'].pop(tensor_name.replace('keypoint_head', f'associate_keypoint_heads.{j}'))
+        # remove expert part
+        keys = new_ckpt['state_dict'].keys()
+        for key in list(keys):
+            if 'expert' in keys:
+                new_ckpt['state_dict'].pop(key)
+            
         torch.save(new_ckpt, os.path.join(args.target, f'{names[i]}.pth'))
 
 if __name__ == '__main__':

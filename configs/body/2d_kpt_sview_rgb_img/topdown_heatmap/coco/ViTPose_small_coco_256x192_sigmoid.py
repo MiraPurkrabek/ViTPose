@@ -2,10 +2,9 @@ COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 
 VAL_COCO_ROOT = COCO_ROOT
 BATCH_SIZE = 64
-PADDING = 1.25
 
 prtr = "models/pretrained/mae_pretrain_vit_small.pth"
-    
+
 _base_ = [
     '../../../../_base_/default_runtime.py',
     '../../../../_base_/datasets/coco.py'
@@ -16,7 +15,7 @@ optimizer = dict(type='AdamW', lr=5e-4, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=12, 
-                                    layer_decay_rate=0.9,
+                                    layer_decay_rate=0.8,
                                     custom_keys={
                                             'bias': dict(decay_multi=0.),
                                             'pos_embed': dict(decay_mult=0.),
@@ -37,7 +36,7 @@ lr_config = dict(
     step=[170, 200])
 total_epochs = 210
 log_config = dict(
-    interval=1,
+    interval=50,
     hooks=[
         dict(type='TextLoggerHook'),
         dict(type='TensorboardLoggerHook')
@@ -78,7 +77,8 @@ model = dict(
         num_deconv_kernels=(4, 4),
         extra=dict(final_conv_kernel=1, ),
         out_channels=channel_cfg['num_output_channels'],
-        loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)),
+        loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True),
+        normalize=True),
     train_cfg=dict(),
     test_cfg=dict(
         flip_test=True,
@@ -101,13 +101,13 @@ data_cfg = dict(
     vis_thr=0.2,
     use_gt_bbox=False,
     det_bbox_thr=0.0,
-    
-    bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
+    bbox_file=VAL_COCO_ROOT + "/annotations/coco_val_perfect_dets.json",
+    # bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
+
 )
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownRandomFlip', flip_prob=0.5),
     dict(
         type='TopDownHalfBodyTransform',
@@ -125,13 +125,10 @@ train_pipeline = [
         type='TopDownGenerateTarget',
         sigma=2,
         encoding='UDP',
-        target_type=target_type,
-        ignore_zeros=False),
+        target_type=target_type),
     dict(
         type='Collect',
-        keys=['img', 'target', 'target_weight',
-                            # 'joints_3d', 'joints_3d_visible', 'ann_info'
-        ],
+        keys=['img', 'target', 'target_weight'],
         meta_keys=[
             'image_file', 'joints_3d', 'joints_3d_visible', 'center', 'scale',
             'rotation', 'bbox_score', 'flip_pairs'
@@ -140,7 +137,6 @@ train_pipeline = [
 
 val_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(
@@ -166,27 +162,21 @@ data = dict(
     test_dataloader=dict(samples_per_gpu=BATCH_SIZE),
     train=dict(
         type='TopDownCocoDataset',
-        # ann_file=f'{data_root}/ochuman_coco.json',
         ann_file=f'{data_root}/annotations/person_keypoints_train2017.json',
-        # img_prefix=f'{VAL_COCO_ROOT}/images/',
         img_prefix=f'{data_root}/train2017/',
         data_cfg=data_cfg,
         pipeline=train_pipeline,
         dataset_info={{_base_.dataset_info}}),
     val=dict(
         type='TopDownCocoDataset',
-        # ann_file=f'{data_root}/ochuman_coco.json',
         ann_file=f'{VAL_COCO_ROOT}/annotations/person_keypoints_val2017.json',
-        # img_prefix=f'{VAL_COCO_ROOT}/images/',
         img_prefix=f'{VAL_COCO_ROOT}/val2017/',
         data_cfg=data_cfg,
         pipeline=val_pipeline,
         dataset_info={{_base_.dataset_info}}),
     test=dict(
         type='TopDownCocoDataset',
-        # ann_file=f'{data_root}/ochuman_coco.json',
         ann_file=f'{VAL_COCO_ROOT}/annotations/person_keypoints_val2017.json',
-        # img_prefix=f'{VAL_COCO_ROOT}/images/',
         img_prefix=f'{VAL_COCO_ROOT}/val2017/',
         data_cfg=data_cfg,
         pipeline=test_pipeline,

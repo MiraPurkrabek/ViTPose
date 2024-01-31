@@ -185,9 +185,9 @@ class TopDownGetRandomScaleRotation:
 class RandomBlackMask:
     """Mask random parts of the image with black.
 
-    Required keys:'img'.
+    Required keys:'img', 'joints_3d', 'joints_3d_visible'.
 
-    Modified keys:'img'.
+    Modified keys:'img', 'joints_3d_visible'.
 
     Args:
         min_mask (float): Minimum part of the image to be masked.
@@ -208,17 +208,28 @@ class RandomBlackMask:
         img = results['img']
         
         if np.random.rand() < self.mask_prob:
+            kpts = np.array(results['joints_3d'])
+            kpts_visible = np.array(results['joints_3d_visible'])
+
+            # Generate random rectangle to keep
             h, w, _ = img.shape
             rh, rw = np.random.uniform(1-self.max_mask, 1-self.min_mask, 2)
             dh = int(h * rh)
             dw = int(w * rw)
             x = np.random.randint(0, w - dw)
             y = np.random.randint(0, h - dh)
-            # print(x, y, dw, dh)
+            
+            # Set all pixels outside of the rectangle to black
             mask = np.zeros((h, w), dtype=np.uint8)
             mask[y:y+dh, x:x+dw] = 1
             img[mask == 0] = 0
             results['img'] = img
+
+            # Change the visibility of blacked keypoints to v=1
+            in_black = (kpts[:, 0] >= x) & (kpts[:, 0] <= x+dw) & \
+                          (kpts[:, 1] >= y) & (kpts[:, 1] <= y+dh)
+            kpts_visible[in_black] = 0
+            results['joints_3d_visible'] = kpts_visible
 
         return results
 

@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import cv2
-from mmpose.datasets.pipelines.top_down_transform import TopDownGenerateTarget, bbox_xywh2cs, TopDownGetBboxCenterScale
+from mmpose.datasets.pipelines.top_down_transform import TopDownGenerateTarget
 from mmpose.core.evaluation.top_down_eval import keypoints_from_heatmaps
 from mmpose.datasets import build_dataset
 from mmpose.datasets import build_dataloader
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     dataset = build_dataset(cfg.data.train)
     results = dataset[np.random.randint(0, len(dataset))]
     target = results["target"]
-    visibilities = results["joints_3d_visible"]
+    # visibilities = results["joints_3d_visible"]
     target_weight = results["target_weight"]
     img = np.array(results["img"]).transpose(1, 2, 0)
     img -= np.min(img)
@@ -60,9 +60,9 @@ if __name__ == "__main__":
     img *= 255
     img = img.astype(np.uint8)
 
-    print(target.shape)
-    for w, v, tg in zip(target_weight, visibilities, target):
-        print("weight:", w, "\tvisibility:", v, "\ttarget all zero:", np.all(tg == 0))
+    # print(target.shape)
+    # for w, v, tg in zip(target_weight, visibilities, target):
+    #     print("weight:", w, "\tvisibility:", v, "\ttarget all zero:", np.all(tg == 0))
 
     # Save the image
     cv2.imwrite("TargetTest/00_img.png", img)

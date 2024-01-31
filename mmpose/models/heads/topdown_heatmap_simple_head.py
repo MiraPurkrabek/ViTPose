@@ -145,7 +145,9 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
             else:
                 self.final_layer = layers[0]
 
-        self.normalize = normalize
+        if normalize:
+            self.final_layer = nn.Sequential(self.final_layer, Sigmoid())
+
 
     def get_loss(self, output, target, target_weight):
         """Calculate top-down keypoint loss.
@@ -203,11 +205,6 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
         x = self._transform_inputs(x)
         x = self.deconv_layers(x)
         x = self.final_layer(x)
-
-        if self.normalize:
-            # print("X before normalization", x.shape, x.sum(), x.min(), x.max())
-            x = Sigmoid()(x)
-            # print("X after normalization", x.shape, x.sum(), x.min(), x.max())
 
         return x
 

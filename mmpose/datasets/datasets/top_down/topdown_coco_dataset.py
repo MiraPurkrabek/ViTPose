@@ -7,163 +7,13 @@ from collections import OrderedDict, defaultdict
 import json_tricks as json
 import numpy as np
 from mmcv import Config, deprecated_api_warning
-# from xtcocotools.cocoeval import COCOeval
-from ._cocoeval import COCOeval
-# from ._cocoeval_orig import COCOeval
+from xtcocotools.cocoeval import COCOeval
+# from ._cocoeval import COCOeval
+
 
 from ....core.post_processing import oks_nms, soft_oks_nms
 from ...builder import DATASETS
 from ..base import Kpt2dSviewRgbImgTopDownDataset
-
-import time
-import datetime
-
-from copy import deepcopy
-
-########################################################################################
-########################################################################################
-
-def accumulate_orig(self, p = None):
-    '''
-    Accumulate per image evaluation results and store the result in self.eval
-    :param p: input params for evaluation
-    :return: None
-    '''
-    print('Accumulating evaluation results...')
-    tic = time.time()
-    if not self.evalImgs:
-        print('Please run evaluate() first')
-    # allows input customized parameters
-    if p is None:
-        p = self.params
-    p.catIds = p.catIds if p.useCats == 1 else [-1]
-    T           = len(p.iouThrs)
-    R           = len(p.recThrs)
-    K           = len(p.catIds) if p.useCats else 1
-    A           = len(p.areaRng)
-    M           = len(p.maxDets)
-    precision   = -np.ones((T,R,K,A,M)) # -1 for the precision of absent categories
-    recall      = -np.ones((T,K,A,M))
-    scores      = -np.ones((T,R,K,A,M))
-
-    # create dictionary for future indexing
-    _pe = self._paramsEval
-    catIds = _pe.catIds if _pe.useCats else [-1]
-    setK = set(catIds)
-    setA = set(map(tuple, _pe.areaRng))
-    setM = set(_pe.maxDets)
-    setI = set(_pe.imgIds)
-    # get inds to evaluate
-    k_list = [n for n, k in enumerate(p.catIds)  if k in setK]
-    m_list = [m for n, m in enumerate(p.maxDets) if m in setM]
-    a_list = [n for n, a in enumerate(map(lambda x: tuple(x), p.areaRng)) if a in setA]
-    i_list = [n for n, i in enumerate(p.imgIds)  if i in setI]
-    I0 = len(_pe.imgIds)
-    A0 = len(_pe.areaRng)
-    # retrieve E at each category, area range, and max number of detections
-    for k, k0 in enumerate(k_list):
-        Nk = k0*A0*I0
-        for a, a0 in enumerate(a_list):
-            Na = a0*I0
-            for m, maxDet in enumerate(m_list):
-                print("\n===")
-                E = [self.evalImgs[Nk + Na + i] for i in i_list]
-                E = [e for e in E if not e is None]
-                if len(E) == 0:
-                    continue
-                dtScores = np.concatenate([e['dtScores'][0:maxDet] for e in E])
-                # different sorting method generates slightly different results.
-                # mergesort is used to be consistent as Matlab implementation.
-                inds = np.argsort(-dtScores, kind='mergesort')
-                dtScoresSorted = dtScores[inds]
-
-                # print(self.params.imgIds)
-                i = 0
-                for imgId in self.params.imgIds:
-                    oks = self.computeOks(imgId, 1)
-                    if len(oks) > 0:
-                        print("{} ({:d}): {}".format(imgId, i, oks))
-                        i+=1
-
-                # for e in E:
-                #     print("{}: {} x {}".format(e["image_id"], e["dtIds"], e["gtIds"]))
-                # print("E[0]", E[0])
-
-                dtm  = np.concatenate([e['dtMatches'][:,0:maxDet] for e in E], axis=1)[:,inds]
-                print("dtm.shape", dtm.shape)
-                dtIg = np.concatenate([e['dtIgnore'][:,0:maxDet]  for e in E], axis=1)[:,inds]
-                gtIg = np.concatenate([e['gtIgnore'] for e in E])
-                npig = np.count_nonzero(gtIg == 0)
-                if npig == 0:
-                    continue
-                # https://github.com/cocodataset/cocoapi/pull/332/
-                tps = np.logical_and(dtm >= 0, np.logical_not(dtIg))
-                fps = np.logical_and(dtm < 0, np.logical_not(dtIg))
-
-                print("tps.shape", tps.shape)
-                print("fps.shape", fps.shape)
-                
-                print("fps[0] == fps[3]", np.all(fps[0, :] == fps[3, :]))
-                print("tps[3]", tps[3, :])
-                print("fps[3]", fps[3, :])
-
-                ious_keys = {k:v for k, v in self.ious.items() if v != []}
-                print("ious_keys", len(self.ious.keys()))
-                for k, v in ious_keys.items():
-                    print("{}: {}".format(k, v.shape))
-
-                
-                
-                tp_sum = np.cumsum(tps, axis=1).astype(dtype=np.float64)
-                fp_sum = np.cumsum(fps, axis=1).astype(dtype=np.float64)
-                
-                print("tp_sum.shape", tp_sum.shape)
-                print("fp_sum.shape", fp_sum.shape)
-                
-                for t, (tp, fp) in enumerate(zip(tp_sum, fp_sum)):
-                    tp = np.array(tp)
-                    fp = np.array(fp)
-                    nd = len(tp)
-                    rc = tp / npig
-                    pr = tp / (fp+tp+np.spacing(1))
-                    q  = np.zeros((R,))
-                    ss = np.zeros((R,))
-
-                    if nd:
-                        recall[t,k,a,m] = rc[-1]
-                    else:
-                        recall[t,k,a,m] = 0
-
-                    # numpy is slow without cython optimization for accessing elements
-                    # use python array gets significant speed improvement
-                    pr = pr.tolist(); q = q.tolist()
-
-                    for i in range(nd-1, 0, -1):
-                        if pr[i] > pr[i-1]:
-                            pr[i-1] = pr[i]
-
-                    inds = np.searchsorted(rc, p.recThrs, side='left')
-                    try:
-                        for ri, pi in enumerate(inds):
-                            q[ri] = pr[pi]
-                            ss[ri] = dtScoresSorted[pi]
-                    except:
-                        pass
-                    precision[t,:,k,a,m] = np.array(q)
-                    scores[t,:,k,a,m] = np.array(ss)
-    self.eval = {
-        'params': p,
-        'counts': [T, R, K, A, M],
-        'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'precision': precision,
-        'recall':   recall,
-        'scores': scores,
-    }
-    toc = time.time()
-    print('DONE (t={:0.2f}s).'.format( toc-tic))
-
-########################################################################################
-########################################################################################
 
 
 @DATASETS.register_module()
@@ -232,16 +82,6 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             dataset_info=dataset_info,
             test_mode=test_mode)
 
-        # Set huge sigmas for face - effectively ignore the face keypoints.
-        # print(self.sigmas)
-        # self.sigmas = np.array(
-        #         [.26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89])/10.0
-        # self.sigmas = np.array(
-        #         [.25, 500, 500, 500, 500, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89])/10.0
-        # self.sigmas = np.array(
-        #         [.26, .25, .25, .35, 50.0, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89])/10.0
-        # print(self.sigmas)
-
         self.use_gt_bbox = data_cfg['use_gt_bbox']
         self.bbox_file = data_cfg['bbox_file']
         self.det_bbox_thr = data_cfg.get('det_bbox_thr', 0.0)
@@ -301,8 +141,8 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             x, y, w, h = obj['bbox']
             x1 = max(0, x)
             y1 = max(0, y)
-            x2 = min(width - 1, x1 + max(0, w))
-            y2 = min(height - 1, y1 + max(0, h))
+            x2 = min(width - 1, x1 + max(0, w - 1))
+            y2 = min(height - 1, y1 + max(0, h - 1))
             if ('area' not in obj or obj['area'] > 0) and x2 > x1 and y2 > y1:
                 obj['clean_bbox'] = [x1, y1, x2 - x1, y2 - y1]
                 valid_objs.append(obj)
@@ -322,11 +162,15 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
 
             keypoints = np.array(obj['keypoints']).reshape(-1, 3)
             joints_3d[:, :2] = keypoints[:, :2]
-            joints_3d_visible[:, :2] = keypoints[:, 2:3]
+            joints_3d_visible[:, :2] = np.minimum(1, keypoints[:, 2:3])
+
+            center, scale = self._xywh2cs(*obj['clean_bbox'][:4])
 
             image_file = osp.join(self.img_prefix, self.id2name[img_id])
             rec.append({
                 'image_file': image_file,
+                'center': center,
+                'scale': scale,
                 'bbox': obj['clean_bbox'][:4],
                 'rotation': 0,
                 'joints_3d': joints_3d,
@@ -349,9 +193,6 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
         if not all_boxes:
             raise ValueError('=> Load %s fail!' % self.bbox_file)
 
-        if isinstance(all_boxes, dict):
-            all_boxes = all_boxes["annotations"]
-
         print(f'=> Total boxes: {len(all_boxes)}')
 
         kpt_db = []
@@ -363,19 +204,18 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             image_file = osp.join(self.img_prefix,
                                   self.id2name[det_res['image_id']])
             box = det_res['bbox']
-
-            try:
-                score = det_res['score']
-            except KeyError:
-                score = 1.0
+            score = det_res['score']
 
             if score < self.det_bbox_thr:
                 continue
 
+            center, scale = self._xywh2cs(*box[:4])
             joints_3d = np.zeros((num_joints, 3), dtype=np.float32)
             joints_3d_visible = np.ones((num_joints, 3), dtype=np.float32)
             kpt_db.append({
                 'image_file': image_file,
+                'center': center,
+                'scale': scale,
                 'rotation': 0,
                 'bbox': box[:4],
                 'bbox_score': score,
@@ -388,20 +228,6 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
         print(f'=> Total boxes after filter '
               f'low score@{self.det_bbox_thr}: {bbox_id}')
         return kpt_db
-
-    def evaluate_per_kpts(self, results, res_folder=None, metric='mAP', return_score=False, **kwargs):
-        save_sigmas = deepcopy(self.sigmas)
-
-        results_arr = []
-        for i in range(len(self.sigmas)):
-            sigmas = deepcopy(save_sigmas)
-            sigmas[i] = 10.0
-            self.sigmas = sigmas
-            r, _, _ = self.evaluate(results, res_folder=res_folder, metric=metric, return_score=return_score, sigmas=sigmas, **kwargs)
-            results_arr.append(r)
-
-        self.sigmas = save_sigmas
-        return results_arr
 
     @deprecated_api_warning(name_dict=dict(outputs='results'))
     def evaluate(self, results, res_folder=None, metric='mAP', return_score=False, **kwargs):
@@ -422,7 +248,7 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
                     coordinates, score is the third dimension of the array.
                 - boxes (np.ndarray[N,6]): [center[0], center[1], scale[0], \
                     scale[1],area, score]
-                - image_paths (list[str]): For example, ['/datagrid/personal/purkrmir/data/COCO/original/val2017\
+                - image_paths (list[str]): For example, ['data/coco/val2017\
                     /000000393226.jpg']
                 - heatmap (np.ndarray[N, K, H, W]): model output heatmap
                 - bbox_id (list(int)).
@@ -468,7 +294,6 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
                     'bbox_id': bbox_ids[i]
                 })
         kpts = self._sort_and_unique_bboxes(kpts)
-        # self.use_nms = False
 
         # rescoring and oks nms
         num_joints = self.ann_info['num_joints']
@@ -479,22 +304,17 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             img_kpts = kpts[image_id]
             for n_p in img_kpts:
                 box_score = n_p['score']
-                if kwargs.get('rle_score', False):
-                    pose_score = n_p['keypoints'][:, 2]
-                    n_p['score'] = float(box_score + np.mean(pose_score) +
-                                         np.max(pose_score))
-                else:
-                    kpt_score = 0
-                    valid_num = 0
-                    for n_jt in range(0, num_joints):
-                        t_s = n_p['keypoints'][n_jt][2]
-                        if t_s > vis_thr:
-                            kpt_score = kpt_score + t_s
-                            valid_num = valid_num + 1
-                    if valid_num != 0:
-                        kpt_score = kpt_score / valid_num
-                    # rescoring
-                    n_p['score'] = kpt_score * box_score
+                kpt_score = 0
+                valid_num = 0
+                for n_jt in range(0, num_joints):
+                    t_s = n_p['keypoints'][n_jt][2]
+                    if t_s > vis_thr:
+                        kpt_score = kpt_score + t_s
+                        valid_num = valid_num + 1
+                if valid_num != 0:
+                    kpt_score = kpt_score / valid_num
+                # rescoring
+                n_p['score'] = kpt_score * box_score
 
             if self.use_nms:
                 nms = soft_oks_nms if self.soft_nms else oks_nms
@@ -513,14 +333,8 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
                 info_str = self._do_python_keypoint_eval(res_file, return_wrong_images=False)
             name_value = OrderedDict(info_str)
 
-            if tmp_folder is not None:
-                tmp_folder.cleanup()
-        else:
-            warnings.warn(f'Due to the absence of ground truth keypoint'
-                          f'annotations, the quantitative evaluation can not'
-                          f'be conducted. The prediction results have been'
-                          f'saved at: {osp.abspath(res_file)}')
-            name_value = {}
+        if tmp_folder is not None:
+            tmp_folder.cleanup()
 
         if return_score:
             return name_value, sorted_matches
@@ -574,14 +388,7 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
     def _do_python_keypoint_eval(self, res_file, return_wrong_images=False):
         """Keypoint evaluation using COCOAPI."""
         coco_det = self.coco.loadRes(res_file)
-        coco_eval = COCOeval(
-            self.coco,
-            coco_det,
-            'keypoints',
-            # self.sigmas,                # Commented out in the original
-            # extended_oks=True,          # Commented out in the original
-            # confidence_thr=0.3          # Commented out in the original
-        )
+        coco_eval = COCOeval(self.coco, coco_det, 'keypoints', self.sigmas)
         coco_eval.params.useSegm = None
         coco_eval.evaluate()
         coco_eval.accumulate()
@@ -590,90 +397,20 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
         if return_wrong_images:
             sorted_matches = self._sort_images_by_prediction_score(coco_eval)
 
-        # stats_names = [
-        #     'AP', 'AP .5', 'AP .75', 'AP (M)', 'AP (L)', 'AR', 'AR .5',
-        #     'AR .75', 'AR (M)', 'AR (L)'
-        # ]
-        stats_names = coco_eval.stats_names
+        try:
+            stats_names = coco_eval.stats_names
+        except AttributeError:
+            stats_names = [
+                'AP', 'AP .5', 'AP .75', 'AP (M)', 'AP (L)', 'AR', 'AR .5',
+                'AR .75', 'AR (M)', 'AR (L)'
+            ]
 
         info_str = list(zip(stats_names, coco_eval.stats))
-
-        # print(info_str)
 
         if return_wrong_images:
             return info_str, sorted_matches
         else:
             return info_str
-
-    def _sort_images_by_prediction_score(self, coco_eval):
-        # print("\n\nSort by predition score\n\n")
-        if not hasattr(coco_eval, "matched_pairs"):
-            coco_eval.evaluate()
-
-        img_score_dict = {}
-        sample_score_dict = {}
-
-        matches = np.array(coco_eval.matched_pairs)
-
-        ious = [m[2] for m in matches]
-        sort_idx = np.argsort(ious)
-        # print(sort_idx)
-        sorted_matches = matches[sort_idx]
-
-        # for match in sorted_matches:
-        #     dt, gt, iou = match
-        #     gt_center = [gt["bbox"][0] + gt["bbox"][2] / 2, gt["bbox"][1] + gt["bbox"][3] / 2]
-        #     print("GT: {}, gt_bbox: {}, gt_ignore: {}, dt_bbox: {}, iou: {}".format(gt["id"], gt_center, gt["_ignore"], dt["center"], iou))
-        
-        # # Take only eval images with area == all --> first part of the evalImgs
-        # n_areas = len(coco_eval.params.areaRng)
-        # eval_imgs_slice = len(coco_eval.evalImgs) // n_areas
-        # eval_imgs = coco_eval.evalImgs[:eval_imgs_slice]
-
-        # # Compute score for each image. Score is MIN / MEAN of IoUs (= OKSs) 
-        # # over all poses in the image
-        # for img_eval in eval_imgs:
-            
-        #     if img_eval is None:
-        #         continue
-            
-        #     # print("-"*20)
-        #     # print(img_eval)
-            
-        #     dtMatches = np.array(img_eval["dtMatches_nolevel"])
-        #     dtMatches = np.array(img_eval["gtIds"])[img_eval["gtIndices"]]
-        #     assignment_cost = np.array(img_eval["assignment_cost"])
-
-        #     gtIds = np.array(img_eval["gtIds"])
-        #     dtIds = np.array(img_eval["dtIds"])
-
-        #     # if len(dtIds) > len(gtIds):
-        #     #     print("-"*20)
-        #     #     print(img_eval)
-
-        #     gtIgnore = np.array(img_eval["gtIgnore"])
-
-        #     # Default OKS is 0, for ignored it is NaN
-        #     # This i sprobably obsolete is it does not happed i the COCO
-        #     for gt, ign in zip(gtIds, gtIgnore):
-        #         if ign:
-        #             sample_score_dict[int(gt)] = np.nan
-        #         else:
-        #             sample_score_dict[int(gt)] = 0
-
-        #     # Give OKS to assigned (= matched) GTs
-        #     for gt, cost in zip(dtMatches, assignment_cost):
-        #         sample_score_dict[int(gt)] = cost
-
-        #     assignment_cost = assignment_cost[np.isnan(assignment_cost) == False]
-
-        #     img_name = self.id2name[img_eval["image_id"]]
-        #     if len(assignment_cost) > 0:
-        #         img_score_dict[img_name] = np.mean(assignment_cost)
-        #     else:
-        #         img_score_dict[img_name] = np.nan
-
-        return sorted_matches
 
     def _sort_and_unique_bboxes(self, kpts, key='bbox_id'):
         """sort kpts and remove the repeated ones."""

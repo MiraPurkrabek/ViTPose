@@ -1,5 +1,5 @@
-# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
-COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1"
+COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+# COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1"
 BATCH_SIZE = 64
 
 _base_ = [
@@ -63,10 +63,11 @@ model = dict(
     keypoint_head=dict(
         type='TopdownHeatmapSimpleHead',
         in_channels=384,
-        num_deconv_layers=2,
-        num_deconv_filters=(256, 256),
-        num_deconv_kernels=(4, 4),
-        extra=dict(final_conv_kernel=1, ),
+        num_deconv_layers=0,
+        num_deconv_filters=[],
+        num_deconv_kernels=[],
+        upsample=4,
+        extra=dict(final_conv_kernel=3, ),
         out_channels=channel_cfg['num_output_channels'],
         loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)),
     train_cfg=dict(),

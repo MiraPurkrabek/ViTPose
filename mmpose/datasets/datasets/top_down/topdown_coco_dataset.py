@@ -162,7 +162,8 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
 
             keypoints = np.array(obj['keypoints']).reshape(-1, 3)
             joints_3d[:, :2] = keypoints[:, :2]
-            joints_3d_visible[:, :2] = np.minimum(1, keypoints[:, 2:3])
+            # joints_3d_visible[:, :2] = np.minimum(1, keypoints[:, 2:3])
+            joints_3d_visible[:, :2] = keypoints[:, 2:3].astype(int)
 
             center, scale = self._xywh2cs(*obj['clean_bbox'][:4])
 

@@ -228,7 +228,7 @@ class RandomBlackMask:
             # Change the visibility of blacked keypoints to v=1
             in_black = (kpts[:, 0] >= x) & (kpts[:, 0] <= x+dw) & \
                           (kpts[:, 1] >= y) & (kpts[:, 1] <= y+dh)
-            kpts_visible[in_black] = 0
+            kpts_visible[in_black] = 1
             results['joints_3d_visible'] = kpts_visible
 
         return results

@@ -1,4 +1,5 @@
 import os
+import shutil
 import numpy as np
 import cv2
 from mmpose.datasets.pipelines.top_down_transform import TopDownGenerateTarget
@@ -8,6 +9,7 @@ from mmpose.datasets import build_dataloader
 from mmcv import Config
 import torch
 from copy import deepcopy
+from tqdm import tqdm
 
 from posevis import pose_visualization
 
@@ -48,24 +50,47 @@ def test_generate_target(input_data, save_dir="TargetTest", show=True):
 
 if __name__ == "__main__":
     
-    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_reproduce.py")
+    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_blackout.py")
     dataset = build_dataset(cfg.data.train)
-    for _ in range(10):
-        results = dataset[np.random.randint(0, len(dataset))]
-    target = results["target"]
-    # visibilities = results["joints_3d_visible"]
-    target_weight = results["target_weight"]
-    img = np.array(results["img"]).transpose(1, 2, 0)
-    img -= np.min(img)
-    img /= np.max(img)
-    img *= 255
-    img = img.astype(np.uint8)
+    shutil.rmtree("TargetTest", ignore_errors=True)
+    os.makedirs("TargetTest", exist_ok=True)
+    for i in tqdm(range(30), ascii=True):
+        idx = np.random.randint(0, len(dataset))
+        # idx = 52601
+        results = dataset[idx]
+        target = results["target"]
+        
+        # If path to original image is available, save it
+        try:
+            image_path = results["image_file"]
+            original_img = cv2.imread(image_path)
+            cv2.imwrite("TargetTest/{:02d}_original_img.png".format(i), original_img)
+        except KeyError:
+            pass
+        
+        img = np.array(results["img"]).transpose(1, 2, 0)
+        img -= np.min(img)
+        img /= np.max(img)
+        img *= 255
+        img = img.astype(np.uint8)
+        cv2.imwrite("TargetTest/{:02d}_img.png".format(i), img)
+        for j, tgt in enumerate(target):
+            
+            # Resize to 256x192 and colorize
+            tgt = cv2.resize(tgt, (192, 256))
+            tgt = tgt.astype(np.float32)
+            tgt *= 255
+            tgt = tgt.astype(np.uint8)
+            mask = tgt > 0
+            tgt = cv2.applyColorMap(tgt, cv2.COLORMAP_JET)
+            
+            # Only overlay parts where heatmap is non-zero
+            img_copy = deepcopy(img)
+            img_copy[mask] = tgt[mask]
 
-    # print(target.shape)
-    # for w, v, tg in zip(target_weight, visibilities, target):
-    #     print("weight:", w, "\tvisibility:", v, "\ttarget all zero:", np.all(tg == 0))
-
-    # Save the image
-    cv2.imwrite("TargetTest/00_img.png", img)
-
-    # heatmaps, target = test_generate_target(input_data, show=True)
+            # Overlay the heatmap
+            img = cv2.addWeighted(img_copy, 0.3, img, 0.7, 0)
+        
+        cv2.imwrite("TargetTest/{:02d}_img_w_heatmaps.png".format(i), img)
+    
+    

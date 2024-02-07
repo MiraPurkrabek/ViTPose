@@ -61,7 +61,8 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                  train_cfg=None,
                  test_cfg=None,
                  upsample=0,
-                 normalize=False):
+                 normalize=False,
+                 use_prelu=False):
         super().__init__()
 
         self.in_channels = in_channels
@@ -75,6 +76,11 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
         self._init_inputs(in_channels, in_index, input_transform)
         self.in_index = in_index
         self.align_corners = align_corners
+
+        if use_prelu:
+            self.nonlinearity = nn.PReLU()
+        else:
+            self.nonlinearity = nn.ReLU(inplace=True)
 
         if extra is not None and not isinstance(extra, dict):
             raise TypeError('extra should be dict or None.')
@@ -129,7 +135,7 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                             padding=(num_conv_kernels[i] - 1) // 2))
                     layers.append(
                         build_norm_layer(dict(type='BN'), conv_channels)[1])
-                    layers.append(nn.ReLU(inplace=True))
+                    layers.append(self.nonlinearity)
 
             layers.append(
                 build_conv_layer(
@@ -139,7 +145,8 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                     kernel_size=kernel_size,
                     stride=1,
                     padding=padding))
-
+            layers.append(self.nonlinearity)
+            
             if len(layers) > 1:
                 self.final_layer = nn.Sequential(*layers)
             else:
@@ -338,7 +345,7 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                     output_padding=output_padding,
                     bias=False))
             layers.append(nn.BatchNorm2d(planes))
-            layers.append(nn.ReLU(inplace=True))
+            layers.append(self.nonlinearity)
             self.in_channels = planes
 
         return nn.Sequential(*layers)

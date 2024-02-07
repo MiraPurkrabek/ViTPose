@@ -551,6 +551,8 @@ class TopDownGenerateTarget:
                     # If not, just return the image as is
                     if ignore_zeros:
                         target_weight[joint_id] = 0
+                    else:
+                        target_weight[joint_id] = min(vis, 0)
                     continue
 
                 feat_stride = (image_size - 1.0) / (heatmap_size - 1.0)

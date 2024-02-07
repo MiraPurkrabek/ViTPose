@@ -4,19 +4,30 @@ from mmpose.datasets.datasets.top_down._cocoeval import COCOeval
 
 gt = COCO(
     # '/datagrid/personal/purkrmir/data/OCHuman/COCO-like/annotations/person_keypoints_val2017.json',
-    '/datagrid/personal/purkrmir/data/COCO/original/annotations/person_keypoints_val2017.json',
+    # '/datagrid/personal/purkrmir/data/COCO/original/annotations/person_keypoints_val2017.json',
+    '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped/annotations/person_keypoints_val2017.json',
     # '/datagrid/personal/purkrmir/data/COCO/original/tmp_annotations/person_keypoints_val2017_one.json',
 )
 
 pred = gt.loadRes(
     # '/datagrid/personal/purkrmir/ViTPose/coco_test/vanilla_OCHuman.json',
-    '/datagrid/personal/purkrmir/ViTPose/coco_test/vanilla_COCO.json',
+    # '/datagrid/personal/purkrmir/ViTPose/coco_test/vanilla_COCO.json',
+    '/datagrid/personal/purkrmir/ViTPose/coco_test/vanilla_OOI_COCO.json',
     # '/datagrid/personal/purkrmir/ViTPose/coco_test/base_COCO.json',
     # '/datagrid/personal/purkrmir/ViTPose/coco_test/huge_COCO.json',
     # '/datagrid/personal/purkrmir/data/COCO/original/tmp_annotations/person_keypoints_val2017_pred.json',
 )
 
-coco_eval = COCOeval(gt, pred, 'keypoints', extended_oks=True, alpha=None, confidence_thr=1e-10)
+coco_eval = COCOeval(
+    gt,
+    pred,
+    'keypoints',
+    extended_oks=True,
+    confidence_thr=None,
+    alpha=0.0,
+    beta=1.0,
+)
+
 coco_eval.evaluate()
 coco_eval.accumulate()
 coco_eval.summarize()

@@ -324,7 +324,7 @@ def main():
         num_non_nan = (np.isnan(oks_list) == False).sum()
         print("There is {:d} non-NaN OKS scores out of {:d} samples".format(num_non_nan, len(oks_list)))
 
-        draw_all = False
+        draw_all = True
         if draw_all: 
             num_images = len(oks_list)
             indices_to_draw = list(range(num_images))
@@ -409,12 +409,12 @@ def main():
             dt_img_id = dt["image_id"]
             bbox_cs = np.array(list(dt["center"]) + list(dt["scale"])).reshape((1, 4))
             bbox_wh = bbox_cs2xywh(bbox_cs[:, :2], bbox_cs[:, 2:], padding=1.0).reshape((1, 4))
-            bbox_xy = bbox_xywh2xyxy(bbox_wh).squeeze()
-            bbox_wh[bbox_wh < 0] = 0
-            bbox_xy[bbox_xy < 0] = 0
+            # bbox_xy = bbox_xywh2xyxy(bbox_wh).squeeze()
+            # bbox_wh[bbox_wh < 0] = 0
+            # bbox_xy[bbox_xy < 0] = 0
             
             pose_results.append({
-                "keypoints": dt["keypoints"],
+                "keypoints": np.array(dt["keypoints"]).reshape(17, 3),
                 "bbox": bbox_wh,
             })
 
@@ -459,8 +459,63 @@ def main():
             #     show_bbox=False,
             # )
 
+            # If GT or PRED kpts outside of the image, pad the image
+            save_img = cv2.imread(image_path)
+            min_x = 0
+            min_y = 0
+            max_x = save_img.shape[1]
+            max_y = save_img.shape[0]
+            for gt_pose in gt_pose_results:
+                valid_kpts = gt_pose["keypoints"][:, -1] > 0
+                if np.sum(valid_kpts) == 0:
+                    continue
+                min_x = min(min_x, int(np.min(gt_pose["keypoints"][valid_kpts, 0]))-10)
+                min_y = min(min_y, int(np.min(gt_pose["keypoints"][valid_kpts, 1]))-10)
+                max_x = max(max_x, int(np.max(gt_pose["keypoints"][valid_kpts, 0]))+10)
+                max_y = max(max_y, int(np.max(gt_pose["keypoints"][valid_kpts, 1]))+10)
+            for pose in pose_results:
+                valid_kpts = pose["keypoints"][:, -1] > 0
+                if np.sum(valid_kpts) == 0:
+                    continue
+                min_x = min(min_x, int(np.min(pose["keypoints"][valid_kpts, 0]))-10)
+                min_y = min(min_y, int(np.min(pose["keypoints"][valid_kpts, 1]))-10)
+                max_x = max(max_x, int(np.max(pose["keypoints"][valid_kpts, 0]))+10)
+                max_y = max(max_y, int(np.max(pose["keypoints"][valid_kpts, 1]))+10)
+            save_img = cv2.copyMakeBorder(
+                save_img,
+                -min_y,
+                max_y - save_img.shape[0],
+                -min_x,
+                max_x - save_img.shape[1],
+                cv2.BORDER_CONSTANT,
+                value=[80, 80, 80],
+            )
+
+            # Shift kpts and bboxes by the padding
+            for gt_pose in gt_pose_results:
+                valid_kpts = gt_pose["keypoints"][:, -1] > 0
+                if np.sum(valid_kpts) == 0:
+                    continue
+                gt_pose["keypoints"][valid_kpts, 0] -= min_x
+                gt_pose["keypoints"][valid_kpts, 1] -= min_y
+                gt_pose["bbox"][:, 0] -= min_x
+                gt_pose["bbox"][:, 1] -= min_y
+            for pose in pose_results:
+                valid_kpts = pose["keypoints"][:, -1] > 0
+                if np.sum(valid_kpts) == 0:
+                    continue
+                pose["keypoints"][valid_kpts, 0] -= min_x
+                pose["keypoints"][valid_kpts, 1] -= min_y
+                pose["bbox"][:, 0] -= min_x
+                pose["bbox"][:, 1] -= min_y
+
+            # print("-"*10, "\n", "-"*10)
+            # print(oks_score_for_this_sample)
+            # print(gt_pose_results)
+            # print(pose_results)
+
             save_img = pose_visualization(
-                image_path,
+                save_img,
                 gt_pose_results,
                 show_markers=False,
                 line_type="dashed",

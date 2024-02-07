@@ -87,6 +87,7 @@ class COCOeval:
             extended_oks=False,
             confidence_thr=None,
             alpha=None,
+            beta=None,
         ):
         '''
         Initialize CocoEval using coco APIs for gt and dt
@@ -127,6 +128,7 @@ class COCOeval:
         self.extended_oks = extended_oks
         self.confidence_thr = confidence_thr
         self.alpha = alpha
+        self.beta = beta
 
         self.loc_similarities = []
         self.vis_similarities = []
@@ -189,6 +191,12 @@ class COCOeval:
                 else:
                     g = np.array(gt['keypoints'])
                     vis = g[2::3]
+                if not self.extended_oks:
+                    # In the original OKS metric, there are only 3 levels of visibility
+                    # Set everything else than {1, 2} to zeros
+                    vis_mask = (vis == 1) | (vis == 2)
+                    vis[~vis_mask] = 0
+
                 unique_vis, vis_counts = np.unique(vis.astype(int), return_counts=True)
                 self.gt_visibilities.update(unique_vis)
                 for vis, count in zip(unique_vis, vis_counts):
@@ -345,7 +353,7 @@ class COCOeval:
         if self.extended_oks:
             print("Using extended OKS...")
 
-        self.ious = {(imgId, catId): computeIoU(imgId, catId, original= not self.extended_oks, alpha=self.alpha) \
+        self.ious = {(imgId, catId): computeIoU(imgId, catId, original= not self.extended_oks, alpha=self.alpha, beta=self.beta) \
                         for imgId in p.imgIds
                         for catId in catIds}
         
@@ -716,6 +724,8 @@ class COCOeval:
                         # print(inverted_bce)
                         dist_c = abs(cd_i - cg_i)
                         conf_oks = 1 - np.sum(dist_c) / dist_c.shape[0]
+                        # if vis_level == 3:
+                        #     print(cg_i, cd_i, dist_c, conf_oks)
                         # print()
                         # print("conf_oks", conf_oks)
                         # print("cg", cg_i)
@@ -755,15 +765,16 @@ class COCOeval:
 
                     ###############################
                     # Compute extended OKS
+                    # print(alpha, beta, (1-alpha_i-beta_i), alpha_i, beta_i)
                     iou[i, j] = (
                         (1-alpha_i-beta_i) * loc_oks +
                         alpha_i * vis_oks +
                         beta_i * conf_oks
                     )
 
-                    self.loc_similarities.append(loc_oks)# * (1-alpha_i-beta_i))
-                    self.vis_similarities.append(vis_oks)# * alpha_i)
-                    self.conf_similarities.append(conf_oks)# * beta_i)
+                    self.loc_similarities.append(loc_oks * (1-alpha_i-beta_i))
+                    self.vis_similarities.append(vis_oks * alpha_i)
+                    self.conf_similarities.append(conf_oks * beta_i)
 
                     # print("(loc) {:.2f} * {:.2f}\t+\t(vis) {:.2f} * {:.2f}\t+\t(conf) {:.2f} * {:.2f} \t=\t{:.2f}".format(
                     #     (1-alpha_i-beta_i), loc_oks,
@@ -904,6 +915,8 @@ class COCOeval:
             # set unmatched detections outside of area range to ignore
             a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
             dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
+            if np.all(gtIg):
+                dtIg[:] = True
             # store results for given image and category
             image_results = {
                 'image_id':             imgId,
@@ -920,6 +933,8 @@ class COCOeval:
                 'dtIgnore':             dtIg,
                 'gtIndices':            gtind,
             }
+            # if iou_i == 3:
+            #     print(image_results)
         
         return image_results
 

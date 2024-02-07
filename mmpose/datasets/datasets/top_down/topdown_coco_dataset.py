@@ -389,7 +389,16 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
     def _do_python_keypoint_eval(self, res_file, return_wrong_images=False):
         """Keypoint evaluation using COCOAPI."""
         coco_det = self.coco.loadRes(res_file)
-        coco_eval = COCOeval(self.coco, coco_det, 'keypoints', self.sigmas)
+        coco_eval = COCOeval(
+            self.coco,
+            coco_det,
+            'keypoints',
+            self.sigmas,
+            # extended_oks = True,
+            # confidence_thr = None,
+            # alpha = 0.0,
+            # beta = (1 - np.exp(-1)) / (2 - np.exp(-1)),
+            )
         coco_eval.params.useSegm = None
         coco_eval.evaluate()
         coco_eval.accumulate()
@@ -412,6 +421,19 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             return info_str, sorted_matches
         else:
             return info_str
+        
+    def _sort_images_by_prediction_score(self, coco_eval):
+        # print("\n\nSort by predition score\n\n")
+        if not hasattr(coco_eval, "matched_pairs"):
+            coco_eval.evaluate()
+
+        matches = np.array(coco_eval.matched_pairs)
+
+        ious = [m[2] for m in matches]
+        sort_idx = np.argsort(ious)
+        sorted_matches = matches[sort_idx]
+
+        return sorted_matches
 
     def _sort_and_unique_bboxes(self, kpts, key='bbox_id'):
         """sort kpts and remove the repeated ones."""

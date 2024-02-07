@@ -12,6 +12,8 @@ COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/WEPDTOF-Pose/full_COCO-like/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/CrowdedPose/COCO-like/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/pose_experiments/black_masking/ooi_COCO_val/"
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped/'
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_mpii_cropped/'
 
 
 VAL_COCO_ROOT = COCO_ROOT
@@ -126,12 +128,13 @@ data_cfg = dict(
     # bbox_file=VAL_COCO_ROOT + "/detections/YOLOX-x.json",
     # bbox_file=VAL_COCO_ROOT + "/detections/YOLOX-x_nms_070.json",
     
-    bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
+    # bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
+    bbox_file=VAL_COCO_ROOT + "/annotations/coco_val_perfect_dets.json",
 )
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=PADDING),
+    # dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownRandomFlip', flip_prob=0.5),
     dict(
         type='TopDownHalfBodyTransform',
@@ -161,7 +164,7 @@ train_pipeline = [
 
 val_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=PADDING),
+    # dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownAffine', use_udp=True),
     # dict(type='RandomBlackMask', mask_prob=0.7),
     dict(type='ToTensor'),

@@ -1,4 +1,5 @@
-COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped/'
 
 VAL_COCO_ROOT = COCO_ROOT
 BATCH_SIZE = 64

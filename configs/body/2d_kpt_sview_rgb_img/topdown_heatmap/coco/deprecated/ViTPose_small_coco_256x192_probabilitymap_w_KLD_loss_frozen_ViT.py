@@ -4,7 +4,10 @@ VAL_COCO_ROOT = COCO_ROOT
 BATCH_SIZE = 64
 PADDING = 1.25
 
-prtr = "models/pretrained/mae_pretrain_vit_small.pth"
+# prtr = "models/pretrained/mae_pretrain_vit_small.pth"
+# prtr = "models/pretrained/vitpose-s.pth"
+prtr = None
+load_from = "models/my/reproduce_epoch_205.pth"
 
 _base_ = [
     '../../../../_base_/default_runtime.py',
@@ -12,7 +15,7 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=5e-4, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=3e-5, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=12, 
@@ -34,8 +37,8 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=0.001,
-    step=[170, 200])
-total_epochs = 50
+    step=[17, 20])
+total_epochs = 21
 log_config = dict(
     interval=50,
     hooks=[
@@ -69,16 +72,19 @@ model = dict(
         mlp_ratio=4,
         qkv_bias=True,
         drop_path_rate=0.1,
+        frozen_stages=11,
+        freeze_attn=True,
+        freeze_ffn=True,
     ),
     keypoint_head=dict(
-        type='TopdownHeatmapSimpleHead',
+        type='TopdownProbabilityMapSimpleHead',
         in_channels=384,
         num_deconv_layers=2,
         num_deconv_filters=(256, 256),
         num_deconv_kernels=(4, 4),
         extra=dict(final_conv_kernel=1, ),
         out_channels=channel_cfg['num_output_channels'],
-        loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)),
+        loss_keypoint=dict(type='KLDloss', use_target_weight=True)),
     train_cfg=dict(),
     test_cfg=dict(
         flip_test=True,
@@ -126,7 +132,10 @@ train_pipeline = [
         type='TopDownGenerateTarget',
         sigma=2,
         encoding='UDP',
-        target_type=target_type),
+        target_type=target_type,
+        normalize=True,
+        probability_map=True,
+        ignore_zeros=False),
     dict(
         type='Collect',
         keys=['img', 'target', 'target_weight'],

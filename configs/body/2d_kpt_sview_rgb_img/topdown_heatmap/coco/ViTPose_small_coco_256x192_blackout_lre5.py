@@ -1,8 +1,8 @@
-# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
-COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
 
-# VAL_COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
-VAL_COCO_ROOT = COCO_ROOT
+VAL_COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+# VAL_COCO_ROOT = COCO_ROOT
 
 
 BATCH_SIZE = 64
@@ -18,7 +18,7 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=5e-3, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=5e-5, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=12, 
@@ -165,7 +165,6 @@ val_pipeline = [
 test_pipeline = val_pipeline
 
 data_root = COCO_ROOT
-val_data_root = VAL_COCO_ROOT
 data = dict(
     samples_per_gpu=BATCH_SIZE,
     workers_per_gpu=4,

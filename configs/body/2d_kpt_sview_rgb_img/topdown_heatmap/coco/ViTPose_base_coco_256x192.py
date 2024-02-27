@@ -1,11 +1,13 @@
-COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq2"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/OCHuman/COCO-like/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/FACIS/NSFW_TB_benchmark/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/Infants/Infants_benchmark/"
+COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+
 
 VAL_COCO_ROOT = COCO_ROOT
-BATCH_SIZE = 16
+BATCH_SIZE = 64
 
 _base_ = [
     '../../../../_base_/default_runtime.py',
@@ -94,7 +96,7 @@ data_cfg = dict(
     nms_thr=1.0,
     oks_thr=0.9,
     vis_thr=0.2,
-    use_gt_bbox=False,
+    use_gt_bbox=True,
     det_bbox_thr=0.0,
 
     bbox_file=COCO_ROOT + '/annotations/person_keypoints_val2017.json',
@@ -112,7 +114,7 @@ data_cfg = dict(
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.25),
+    # dict(type='TopDownGetBboxCenterScale', padding=1.25),
     dict(type='TopDownRandomFlip', flip_prob=0.5),
     dict(
         type='TopDownHalfBodyTransform',
@@ -142,7 +144,7 @@ train_pipeline = [
 
 val_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownGetBboxCenterScale', padding=1.25),
+    # dict(type='TopDownGetBboxCenterScale', padding=1.25),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(
@@ -154,13 +156,14 @@ val_pipeline = [
         keys=['img'],
         meta_keys=[
             'image_file', 'center', 'scale', 'rotation', 'bbox_score',
-            'flip_pairs'
+            'flip_pairs', 'orig_joints_3d', 'joints_3d_visible'
         ]),
 ]
 
 test_pipeline = val_pipeline
 
 data_root = COCO_ROOT
+val_data_root = VAL_COCO_ROOT
 data = dict(
     samples_per_gpu=BATCH_SIZE,
     workers_per_gpu=4,

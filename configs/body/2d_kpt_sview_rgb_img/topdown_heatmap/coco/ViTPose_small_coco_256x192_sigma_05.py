@@ -1,16 +1,12 @@
-# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
-COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 
-# VAL_COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
 VAL_COCO_ROOT = COCO_ROOT
-
-
 BATCH_SIZE = 64
 PADDING = 1.25
 
-# prtr = "models/pretrained/mae_pretrain_vit_small.pth"
 prtr = None
 load_from = "models/my/reproduce_epoch_205.pth"
+
 
 _base_ = [
     '../../../../_base_/default_runtime.py',
@@ -18,7 +14,7 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=5e-3, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=5e-5, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=12, 
@@ -75,9 +71,6 @@ model = dict(
         mlp_ratio=4,
         qkv_bias=True,
         drop_path_rate=0.1,
-        frozen_stages=11,
-        freeze_attn=True,
-        freeze_ffn=True,
     ),
     keypoint_head=dict(
         type='TopdownHeatmapSimpleHead',
@@ -87,8 +80,7 @@ model = dict(
         num_deconv_kernels=(4, 4),
         extra=dict(final_conv_kernel=1, ),
         out_channels=channel_cfg['num_output_channels'],
-        loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True),
-        normalize=False,),
+        loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)),
     train_cfg=dict(),
     test_cfg=dict(
         flip_test=True,
@@ -109,23 +101,24 @@ data_cfg = dict(
     nms_thr=1.0,
     oks_thr=0.9,
     vis_thr=0.2,
-    use_gt_bbox=True,
+    use_gt_bbox=False,
     det_bbox_thr=0.0,
-    # bbox_file=VAL_COCO_ROOT + "/annotations/coco_val_perfect_dets.json",
-    bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
+    bbox_file=VAL_COCO_ROOT + "/annotations/coco_val_perfect_dets.json",
+    # bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
+
 )
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
+    # dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownRandomFlip', flip_prob=0.5),
     dict(
         type='TopDownHalfBodyTransform',
         num_joints_half_body=8,
         prob_half_body=0.3),
     dict(
-        type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.3),
+        type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.5),
     dict(type='TopDownAffine', use_udp=True),
-    dict(type='RandomBlackMask', mask_prob=0.9, min_mask=0.1, max_mask=0.3),
     dict(type='ToTensor'),
     dict(
         type='NormalizeTensor',
@@ -133,12 +126,14 @@ train_pipeline = [
         std=[0.229, 0.224, 0.225]),
     dict(
         type='TopDownGenerateTarget',
-        sigma=2,
+        sigma=0.5,
         encoding='UDP',
         target_type=target_type),
     dict(
         type='Collect',
-        keys=['img', 'target', 'target_weight'],
+        keys=['img', 'target', 'target_weight',
+                # 'joints_3d', 'image_file'
+              ],
         meta_keys=[
             'image_file', 'joints_3d', 'joints_3d_visible', 'center', 'scale',
             'rotation', 'bbox_score', 'flip_pairs'
@@ -147,6 +142,7 @@ train_pipeline = [
 
 val_pipeline = [
     dict(type='LoadImageFromFile'),
+    # dict(type='TopDownGetBboxCenterScale', padding=PADDING),
     dict(type='TopDownAffine', use_udp=True),
     dict(type='ToTensor'),
     dict(
@@ -158,14 +154,13 @@ val_pipeline = [
         keys=['img'],
         meta_keys=[
             'image_file', 'center', 'scale', 'rotation', 'bbox_score',
-            'flip_pairs', 'orig_joints_3d', 'joints_3d_visible',
+            'flip_pairs'
         ]),
 ]
 
 test_pipeline = val_pipeline
 
 data_root = COCO_ROOT
-val_data_root = VAL_COCO_ROOT
 data = dict(
     samples_per_gpu=BATCH_SIZE,
     workers_per_gpu=4,

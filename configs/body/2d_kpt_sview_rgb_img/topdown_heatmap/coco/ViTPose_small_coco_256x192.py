@@ -1,4 +1,4 @@
-COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_TOP/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_seq_test/"
@@ -14,6 +14,7 @@ COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/pose_experiments/black_masking/ooi_COCO_val/"
 # COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped/'
 # COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_mpii_cropped/'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
 
 
 VAL_COCO_ROOT = COCO_ROOT
@@ -107,7 +108,7 @@ data_cfg = dict(
     nms_thr=1.0,
     oks_thr=0.9,
     vis_thr=0.2,
-    use_gt_bbox=False,
+    use_gt_bbox=True,
     det_bbox_thr=0.0,
 
     # bbox_file=VAL_COCO_ROOT + "/annotations/ConvNext.json",
@@ -128,8 +129,8 @@ data_cfg = dict(
     # bbox_file=VAL_COCO_ROOT + "/detections/YOLOX-x.json",
     # bbox_file=VAL_COCO_ROOT + "/detections/YOLOX-x_nms_070.json",
     
-    # bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
-    bbox_file=VAL_COCO_ROOT + "/annotations/coco_val_perfect_dets.json",
+    bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
+    # bbox_file=VAL_COCO_ROOT + "/annotations/coco_val_perfect_dets.json",
 )
 
 train_pipeline = [
@@ -177,7 +178,7 @@ val_pipeline = [
         keys=['img'],
         meta_keys=[
             'image_file', 'center', 'scale', 'rotation', 'bbox_score',
-            'flip_pairs'
+            'flip_pairs', 'orig_joints_3d', 'joints_3d_visible'
         ]),
 ]
 

@@ -1,5 +1,5 @@
-# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
-COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
 
 # VAL_COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
 VAL_COCO_ROOT = COCO_ROOT
@@ -141,7 +141,7 @@ train_pipeline = [
         keys=['img', 'target', 'target_weight'],
         meta_keys=[
             'image_file', 'joints_3d', 'joints_3d_visible', 'center', 'scale',
-            'rotation', 'bbox_score', 'flip_pairs'
+            'rotation', 'bbox_score', 'flip_pairs', 'bbox_id'
         ]),
 ]
 
@@ -172,7 +172,7 @@ data = dict(
     val_dataloader=dict(samples_per_gpu=BATCH_SIZE),
     test_dataloader=dict(samples_per_gpu=BATCH_SIZE),
     train=dict(
-        type='TopDownCocoDataset',
+        type='TopDownCocoWithSigmasDataset',
         ann_file=f'{data_root}/annotations/person_keypoints_train2017.json',
         img_prefix=f'{data_root}/train2017/',
         data_cfg=data_cfg,

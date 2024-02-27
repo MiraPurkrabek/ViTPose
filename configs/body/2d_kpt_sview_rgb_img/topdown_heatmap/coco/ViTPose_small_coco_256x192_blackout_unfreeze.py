@@ -1,8 +1,8 @@
-# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
-COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
 
-# VAL_COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
-VAL_COCO_ROOT = COCO_ROOT
+VAL_COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+# VAL_COCO_ROOT = COCO_ROOT
 
 
 BATCH_SIZE = 64
@@ -10,7 +10,7 @@ PADDING = 1.25
 
 # prtr = "models/pretrained/mae_pretrain_vit_small.pth"
 prtr = None
-load_from = "models/my/reproduce_epoch_205.pth"
+load_from = "models/my/blackout_epoch_31.pth"
 
 _base_ = [
     '../../../../_base_/default_runtime.py',
@@ -18,7 +18,7 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=5e-3, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=1e-5, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=12, 
@@ -75,9 +75,9 @@ model = dict(
         mlp_ratio=4,
         qkv_bias=True,
         drop_path_rate=0.1,
-        frozen_stages=11,
-        freeze_attn=True,
-        freeze_ffn=True,
+        # frozen_stages=11,
+        # freeze_attn=True,
+        # freeze_ffn=True,
     ),
     keypoint_head=dict(
         type='TopdownHeatmapSimpleHead',
@@ -165,7 +165,6 @@ val_pipeline = [
 test_pipeline = val_pipeline
 
 data_root = COCO_ROOT
-val_data_root = VAL_COCO_ROOT
 data = dict(
     samples_per_gpu=BATCH_SIZE,
     workers_per_gpu=4,

@@ -47,7 +47,8 @@ def single_gpu_test(model, data_loader, return_heatmaps=False):
     return results
 
 
-def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, return_heatmaps=False):
+def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, return_heatmaps=False,
+                   return_probs=False):
     """Test model with multiple gpus.
 
     This method tests model with multiple gpus and collects the results
@@ -69,6 +70,7 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, return_he
     model.eval()
     results = []
     heatmaps = []
+    datas = []
     dataset = data_loader.dataset
     rank, world_size = get_dist_info()
     if rank == 0:
@@ -99,8 +101,14 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, return_he
     #         )
 
         with torch.no_grad():
-            result = model(return_loss=False, return_heatmap=return_heatmaps, **data)
+            result = model(
+                return_loss=False,
+                return_heatmap=return_heatmaps, 
+                return_probs=return_probs , 
+                **data
+            )
         results.append(result)
+        datas.append(data)
 
         if rank == 0:
             # use the first key as main key to calculate the batch size
@@ -113,7 +121,7 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False, return_he
         results = collect_results_gpu(results, len(dataset))
     else:
         results = collect_results_cpu(results, len(dataset), tmpdir)
-    return results
+    return results, datas
 
 
 def collect_results_cpu(result_part, size, tmpdir=None):

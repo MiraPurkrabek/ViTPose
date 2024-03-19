@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from mmcv.cnn import (build_conv_layer, build_norm_layer, build_upsample_layer,
                       constant_init, normal_init)
+import numpy as np
 
 from mmpose.core.evaluation import pose_pck_accuracy
 from mmpose.core.post_processing import flip_back
@@ -61,7 +62,8 @@ class TopdownProbabilityMapSimpleHead(TopdownHeatmapBaseHead):
                  test_cfg=None,
                  upsample=0,
                  normalize=False,
-                 use_prelu=False):
+                 use_prelu=False,
+                 legacy=False):
         super().__init__()
 
         self.in_channels = in_channels
@@ -75,6 +77,7 @@ class TopdownProbabilityMapSimpleHead(TopdownHeatmapBaseHead):
         self._init_inputs(in_channels, in_index, input_transform)
         self.in_index = in_index
         self.align_corners = align_corners
+        self.legacy = legacy
 
         if use_prelu:
             self.nonlinearity = nn.PReLU()
@@ -184,6 +187,7 @@ class TopdownProbabilityMapSimpleHead(TopdownHeatmapBaseHead):
         self.last_softmax = nn.Softmax(dim=2)
 
 
+
     def get_loss(self, output, target, target_weight):
         """Calculate top-down keypoint loss.
 
@@ -199,13 +203,17 @@ class TopdownProbabilityMapSimpleHead(TopdownHeatmapBaseHead):
             target_weight (torch.Tensor[N,K,1]):
                 Weights across different joint types.
         """
-        output = output.reshape((output.shape[0], output.shape[1], 64, 48))
+        # output = output[:, :, :-1] # Remove the last channel as it is not part of the heatmap
+        # output = output.reshape((output.shape[0], output.shape[1], 64, 48))
+
+        # target = target[:, :, :-1] # Remove the last channel as it is not part of the heatmap
+        # target = target.reshape((target.shape[0], target.shape[1], 64, 48))
 
         losses = dict()
 
         assert not isinstance(self.loss, nn.Sequential)
-        assert target.dim() == 4 and target_weight.dim() == 3
-        losses['heatmap_loss'] = self.loss(output, target, target_weight)
+        assert target.dim() == 3 and target_weight.dim() == 3
+        losses['heatmap_loss'] = self.loss(output, target, target_weight, return_dict=False)
 
         return losses
 
@@ -224,7 +232,11 @@ class TopdownProbabilityMapSimpleHead(TopdownHeatmapBaseHead):
             target_weight (torch.Tensor[N,K,1]):
                 Weights across different joint types.
         """
+        output = output[:, :, :-1] # Remove the last channel as it is not part of the heatmap
         output = output.reshape((output.shape[0], output.shape[1], 64, 48))
+
+        target = target[:, :, :-1] # Remove the last channel as it is not part of the heatmap
+        target = target.reshape((target.shape[0], target.shape[1], 64, 48))
 
         accuracy = dict()
 
@@ -240,18 +252,22 @@ class TopdownProbabilityMapSimpleHead(TopdownHeatmapBaseHead):
     def forward(self, x):
         """Forward function."""
         x_htm = self.forward_heatmap(x)
-        x_pred = self.forward_probability(x.detach())
-
+        x_pred = self.forward_probability(x)
+        
         # Normalize the probability map
         B, C, H, W = x_htm.shape
         x_htm = x_htm.reshape((B, C, -1))
         x_pred = x_pred.reshape((B, C, -1))
         x_all = torch.cat((x_htm, x_pred), dim=2)
+        # tmp = x_all.detach().cpu().numpy().squeeze()
+        # print("="*10)
+        # print(tmp[:, :, :-1].sum(axis=2).min(), tmp[:, :, -1].min())
+        # print(tmp[:, :, :-1].sum(axis=2).max(), tmp[:, :, -1].max())
         x_all = self.last_softmax(x_all)
-        x_htm = x_all[:, :, :H*W]
-        x_htm = x_htm.reshape((B, C, H, W))
+        # x_htm = x_all[:, :, :H*W]
+        # x_htm = x_htm.reshape((B, C, H, W))
 
-        return x_htm
+        return x_all
     
     def forward_heatmap(self, x):
         """Forward fucntion for heatmap prediction."""
@@ -267,7 +283,7 @@ class TopdownProbabilityMapSimpleHead(TopdownHeatmapBaseHead):
         y = self.probability_layers(y)
         return y
 
-    def inference_model(self, x, flip_pairs=None):
+    def inference_model(self, x, flip_pairs=None, return_probs=False):
         """Inference function.
 
         Returns:
@@ -279,7 +295,10 @@ class TopdownProbabilityMapSimpleHead(TopdownHeatmapBaseHead):
                 Pairs of keypoints which are mirrored.
         """
         output = self.forward(x)
-        output = output.reshape((output.shape[0], output.shape[1], 64, 48))
+        B, C, _ = output.shape
+        ooi_prob = output[:, :, -1].detach().cpu().numpy()
+        output = output[:, :, :-1] # Remove the last channel as it is not part of the heatmap
+        output = output.reshape((B, C, 64, 48))
 
         if flip_pairs is not None:
             output_heatmap = flip_back(
@@ -291,7 +310,14 @@ class TopdownProbabilityMapSimpleHead(TopdownHeatmapBaseHead):
                 output_heatmap[:, :, :, 1:] = output_heatmap[:, :, :, :-1]
         else:
             output_heatmap = output.detach().cpu().numpy()
-        return output_heatmap
+
+        # output_heatmap *= 2 * np.pi * 2**2 
+        # output_heatmap = output_heatmap.reshape((B, C, -1))
+
+        if return_probs:
+            return output_heatmap, ooi_prob
+        else:
+            return output_heatmap
 
     def _init_inputs(self, in_channels, in_index, input_transform):
         """Check and initialize input transforms.

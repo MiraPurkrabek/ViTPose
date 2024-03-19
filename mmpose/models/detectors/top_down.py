@@ -2,6 +2,7 @@
 import warnings
 
 import mmcv
+import json
 import numpy as np
 from mmcv.image import imwrite
 from mmcv.utils.misc import deprecated_api_warning
@@ -95,6 +96,7 @@ class TopDown(BasePose):
                 img_metas=None,
                 return_loss=True,
                 return_heatmap=False,
+                return_probs=False,
                 **kwargs):
         """Calls either forward_train or forward_test depending on whether
         return_loss=True. Note this setting will change the expected inputs.
@@ -138,7 +140,7 @@ class TopDown(BasePose):
             return self.forward_train(img, target, target_weight, img_metas,
                                       **kwargs)
         return self.forward_test(
-            img, img_metas, return_heatmap=return_heatmap, **kwargs)
+            img, img_metas, return_heatmap=return_heatmap, return_probs=return_probs, **kwargs)
 
     def forward_train(self, img, target, target_weight, img_metas, **kwargs):
         """Defines the computation performed at every call when training."""
@@ -160,7 +162,7 @@ class TopDown(BasePose):
 
         return losses
 
-    def forward_test(self, img, img_metas, return_heatmap=False, **kwargs):
+    def forward_test(self, img, img_metas, return_heatmap=False, return_probs=False, **kwargs):
         """Defines the computation performed at every call when testing."""
         assert img.size(0) == len(img_metas)
         batch_size, _, img_height, img_width = img.shape
@@ -173,8 +175,13 @@ class TopDown(BasePose):
         if self.with_neck:
             features = self.neck(features)
         if self.with_keypoint:
-            output_heatmap = self.keypoint_head.inference_model(
-                features, flip_pairs=None)
+            try:
+                output_heatmap, output_probs, output_errors = self.keypoint_head.inference_model(
+                    features, flip_pairs=None, return_probs=True)
+            except ValueError:
+                output_heatmap, output_probs = self.keypoint_head.inference_model(
+                    features, flip_pairs=None, return_probs=True)
+                output_errors = np.zeros_like(output_probs)
 
         if self.test_cfg.get('flip_test', True):
             img_flipped = img.flip(3)
@@ -182,10 +189,37 @@ class TopDown(BasePose):
             if self.with_neck:
                 features_flipped = self.neck(features_flipped)
             if self.with_keypoint:
-                output_flipped_heatmap = self.keypoint_head.inference_model(
-                    features_flipped, img_metas[0]['flip_pairs'])
+                try:
+                    output_flipped_heatmap, output_flipped_probs, output_flipped_errors = self.keypoint_head.inference_model(
+                        features_flipped, img_metas[0]['flip_pairs'], return_probs=True)
+                except ValueError:
+                    output_flipped_heatmap, output_flipped_probs = self.keypoint_head.inference_model(
+                        features_flipped, img_metas[0]['flip_pairs'], return_probs=True)
+                    output_flipped_errors = np.zeros_like(output_flipped_probs)
+
                 output_heatmap = (output_heatmap +
                                   output_flipped_heatmap) * 0.5
+                # probs = probs * output_flipped_probs
+                # probs = output_flipped_probs
+
+                # breakpoint()
+
+                # Bayesian update (assume P(model)=0.5)
+                # probs = (probs * output_flipped_probs) / 
+                output_probs = (output_probs +
+                        output_flipped_probs) * 0.5
+                output_errors = (output_errors +
+                                    output_flipped_errors) * 0.5
+                
+                # output_heatmap = output_flipped_heatmap
+                # output_probs = output_flipped_probs
+                # diff = np.abs(output_probs - output_flipped_probs)
+                # big_diff = diff > 0.5
+                # if np.any(big_diff):
+                #     print("\nBig diff", big_diff.mean(), diff.mean(), diff.max())
+                # output_probs[big_diff] = -1
+                # output_heatmap = np.maximum(output_heatmap, output_flipped_heatmap)
+                # output_probs = np.minimum(output_probs, output_flipped_probs)
 
         if self.with_keypoint:
             keypoint_result = self.keypoint_head.decode(
@@ -196,6 +230,8 @@ class TopDown(BasePose):
                 output_heatmap = None
 
             result['output_heatmap'] = output_heatmap
+            result['output_probs'] = output_probs
+            result['output_errors'] = output_errors
 
         return result
 

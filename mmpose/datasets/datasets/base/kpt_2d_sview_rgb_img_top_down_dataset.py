@@ -63,6 +63,8 @@ class Kpt2dSviewRgbImgTopDownDataset(Dataset, metaclass=ABCMeta):
         self.ann_info['max_num_joints'] = data_cfg.get('max_num_joints', None)
         self.ann_info['dataset_idx'] = data_cfg.get('dataset_idx', 0)
 
+        self.id = np.random.randint(low=0, high=1000, size=1)
+
         self.ann_info['use_different_joint_weights'] = data_cfg.get(
             'use_different_joint_weights', False)
 

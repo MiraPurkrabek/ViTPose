@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import torch
 import torch.nn as nn
+import numpy as np
 
 from ..builder import LOSSES
 
@@ -21,8 +22,9 @@ class JointsMSELoss(nn.Module):
         self.use_target_weight = use_target_weight
         self.loss_weight = loss_weight
 
-    def forward(self, output, target, target_weight):
+    def forward(self, output, target, target_weight, reduction='mean'):
         """Forward function."""
+
         batch_size = output.size(0)
         num_joints = output.size(1)
 
@@ -31,17 +33,22 @@ class JointsMSELoss(nn.Module):
         heatmaps_gt = target.reshape((batch_size, num_joints, -1)).split(1, 1)
 
         loss = 0.
-
+        
         for idx in range(num_joints):
-            heatmap_pred = heatmaps_pred[idx].squeeze(1)
-            heatmap_gt = heatmaps_gt[idx].squeeze(1)
+            heatmap_pred = heatmaps_pred[idx].squeeze(1)  
+            heatmap_gt = heatmaps_gt[idx].squeeze(1)      
+
             if self.use_target_weight:
-                loss += self.criterion(heatmap_pred * target_weight[:, idx],
+                l = self.criterion(heatmap_pred * target_weight[:, idx],
                                        heatmap_gt * target_weight[:, idx])
             else:
-                loss += self.criterion(heatmap_pred, heatmap_gt)
+                l = self.criterion(heatmap_pred, heatmap_gt)
+            
+            loss += l
+            
+        loss = loss / num_joints * self.loss_weight
 
-        return loss / num_joints * self.loss_weight
+        return loss
 
 
 @LOSSES.register_module()

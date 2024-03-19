@@ -49,6 +49,61 @@ def my_init_pose_model(config, checkpoint=None, device='cuda:0'):
     return model
 
 
+def bbox_from_kpts(kpts, old_bbox, format='xyxy', padding=1.0):
+    """Check if the keypoints are inside the bounding box.
+
+    Args:
+        kpts (np.ndarray): The shape is N x 3. The first two dimensions are
+            the coordinates and the third dimension is the score.
+        bbox (np.ndarray): The shape is 4. The four dimensions are x1, y1, x2,
+            y2.
+
+    Returns:
+        np.ndarray: The modified bounding box that contains all keypoints.
+    """
+    min_x = np.min(kpts[:, 0])
+    max_x = np.max(kpts[:, 0])
+    min_y = np.min(kpts[:, 1])
+    max_y = np.max(kpts[:, 1])
+    
+    center = np.array([(min_x + max_x) / 2, (min_y + max_y) / 2])
+    width = max_x - min_x
+    height = max_y - min_y
+
+    # Pad the bbox
+    width *= padding
+    height *= padding
+
+    bbox = np.array([
+        center[0] - width / 2,
+        center[1] - height / 2,
+        center[0] + width / 2,
+        center[1] + height / 2,
+    ])
+
+    # The new bbox cannot be smaller than the old one
+    bbox[:2] = np.minimum(bbox[:2], old_bbox[:2])
+    bbox[2:4] = np.maximum(bbox[2:4], old_bbox[2:4])
+    
+    if format.lower() == "xywh":
+        bbox = np.array([
+            bbox[0],
+            bbox[1],
+            bbox[2] - bbox[0],
+            bbox[3] - bbox[1],
+        ])
+    elif format.lower() == "cs":
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        bbox = np.array([
+            bbox[0] + width / 2,
+            bbox[1] + height / 2,
+            width,
+            height,
+        ])
+    
+    return bbox
+
 
 def main():
     """Visualize the demo images.
@@ -138,7 +193,9 @@ def main():
         print("Running the mmpose on a single image")
         images_names = [image_name]
 
-    for img_i, image_name in tqdm(enumerate(images_names), ascii=True):
+    results = []
+
+    for img_i, image_name in enumerate(tqdm(images_names, ascii=True)):
         _, relative_image_name = os.path.split(image_name)
 
         # test a single image, the resulting box is (x1, y1, x2, y2)
@@ -153,6 +210,10 @@ def main():
         for i in range(len(person_results)):
             person_results[i]["bbox"][4] = 1.0
             
+        if len(person_results) == 0:
+            print("No person detected in the image", image_name)
+            continue
+
         # test a single image, with a list of bboxes.
 
         # optional
@@ -161,16 +222,40 @@ def main():
         # e.g. use ('backbone', ) to return backbone feature
         output_layer_names = None
 
-        pose_results, returned_outputs = inference_top_down_pose_model(
-            pose_model,
-            image_name,
-            person_results,
-            bbox_thr=args.bbox_thr,
-            format='xyxy',
-            dataset=dataset,
-            dataset_info=dataset_info,
-            return_heatmap=return_heatmap,
-            outputs=output_layer_names)
+        stable_bbox = False
+        idx = 0
+        while not stable_bbox:
+            # pose_results = person_results
+            pose_results, returned_outputs = inference_top_down_pose_model(
+                pose_model,
+                image_name,
+                person_results,
+                bbox_thr=args.bbox_thr,
+                format='xyxy',
+                dataset=dataset,
+                dataset_info=dataset_info,
+                return_heatmap=return_heatmap,
+                outputs=output_layer_names)
+            
+            # Check if the bounding box is stable
+            old_bbox = person_results[0]["bbox"][:4]
+            kpts_bbox = bbox_from_kpts(
+                pose_results[0]["keypoints"][:, :3],
+                old_bbox,
+                format="xyxy",
+                padding=1.05)
+            stable_bbox = np.abs(kpts_bbox - old_bbox)
+            stable_bbox = (stable_bbox < 0.01 * old_bbox).all()
+            
+            if not stable_bbox:
+                person_results[0]["bbox"][:4] = kpts_bbox
+            idx +=1
+
+            if idx > 10:
+                print("The bounding box is not stable even after 10 iterations for image '{}'. Exiting the loop.".format(
+                    image_name
+                ))
+                break
 
         if args.out_img_root == '':
             out_file = None
@@ -183,18 +268,24 @@ def main():
 
         # Show the results using my visualization
         for pose_result in pose_results:
-            kpts = pose_result['keypoints']
-            kpts[kpts[:, 2] >= args.kpt_thr, 2] = 2
-            kpts[kpts[:, 2] < args.kpt_thr, 2] = 0
-            pose_result['keypoints'] = kpts
+            if 'keypoints' in pose_result:
+                kpts = pose_result['keypoints']
+                kpts[kpts[:, 2] >= args.kpt_thr, 2] = 2
+                kpts[kpts[:, 2] < args.kpt_thr, 2] = 0
+                pose_result['keypoints'] = kpts
+            pose_result['bbox'] = pose_result['bbox'][:4]
+            pose_result['bbox'][2:] = pose_result['bbox'][2:] - pose_result['bbox'][:2]
+            pose_result["image_name"] = relative_image_name
+
+            results.append(pose_result)
         try:
             save_img = pose_visualization(
                     image_name,
                     pose_results,
                     show_markers=True,
                     line_type="solid",
-                    width_multiplier=2.0,
-                    show_bbox=True,
+                    width_multiplier=3.0,
+                    show_bbox=False,
                     differ_individuals=False,
                 )
             mmcv.image.imwrite(save_img, out_file)
@@ -213,6 +304,13 @@ def main():
         #     thickness=args.thickness,
         #     show=args.show,
         #     out_file=out_file)
+            
+        # if img_i == 10:
+        #     break
+
+    # Save the results into a json file
+    print("Saving the results into a json file")
+    mmcv.dump(results, os.path.join(args.out_img_root, "results.json"))
 
 
 if __name__ == '__main__':

@@ -369,6 +369,7 @@ class COCOeval:
         maxDet = p.maxDets[-1]
         self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet, iou_i=iou_i,
                                     #   return_matching=True, match_by_bbox=True
+                                    #  match_by_bbox=True,
                                     )
                  for catId in catIds
                  for iou_i in range(len(self.gt_visibilities)+1)
@@ -387,6 +388,7 @@ class COCOeval:
                 return_matching=True,
                 match_by_bbox=True,
             )
+            # breakpoint()
             if img_eval is None or "assigned_pairs" not in img_eval:
                 continue
             self.matched_pairs.extend(img_eval['assigned_pairs'])
@@ -577,8 +579,7 @@ class COCOeval:
         return ious
     
     def computeExtendedOks(self, imgId, catId, original=False, alpha=None, beta=None):
-        
-
+    
 
         p = self.params
         # dimention here should be Nxm
@@ -848,7 +849,7 @@ class COCOeval:
                     for gind, g in enumerate(gt):
                         g_bbox = np.array(g["bbox"])
                         g_center = g_bbox[:2] + g_bbox[2:] / 2
-                        if np.allclose(d_center, g_center):
+                        if abs(d_center - g_center).sum() < 2:
                             iou = ious[iou_i][dind, gind] if not g["ignore"][iou_i] else np.nan
                             assigned_pairs.append((d, g, iou))
                             dtIg[tind, dind] = gtIg[gind]
@@ -888,20 +889,34 @@ class COCOeval:
                         # information about best match so far (m=-1 -> unmatched)
                         curr_iou = min([t,1-1e-10])
                         m   = -1
-                        for gind, g in enumerate(gt):
-                            # if this gt already matched, and not a crowd, continue
-                            if gtm[tind,gind] >= 0 and not iscrowd[gind]:
-                                continue
-                            # if dt matched to reg gt, and on ignore gt, stop
-                            # since all the rest of g's are ignored as well because of the prior sorting
-                            if m > -1 and gtIg[m] == 0 and gtIg[gind] == 1:
-                                break
-                            # continue to next gt unless better match made
-                            if iou[dind,gind] < curr_iou:
-                                continue
-                            # if match successful and best so far, store appropriately
-                            curr_iou = iou[dind,gind]
-                            m = gind
+
+                        if match_by_bbox:
+                            d_center = np.array(d["center"])
+                            for gind, g in enumerate(gt):
+                                g_bbox = np.array(g["bbox"])
+                                g_center = g_bbox[:2] + g_bbox[2:] / 2
+                                if abs(d_center - g_center).sum() < 1:
+                                    iou = ious[iou_i][dind, gind] if not g["ignore"][iou_i] else np.nan
+                                    assigned_pairs.append((d, g, iou))
+                                    dtIg[tind, dind] = gtIg[gind]
+                                    dtm[tind, dind]  = gt[gind]['id']
+                                    gtm[tind, gind]  = d['id']
+                                    break
+                        else:
+                            for gind, g in enumerate(gt):
+                                # if this gt already matched, and not a crowd, continue
+                                if gtm[tind,gind] >= 0 and not iscrowd[gind]:
+                                    continue
+                                # if dt matched to reg gt, and on ignore gt, stop
+                                # since all the rest of g's are ignored as well because of the prior sorting
+                                if m > -1 and gtIg[m] == 0 and gtIg[gind] == 1:
+                                    break
+                                # continue to next gt unless better match made
+                                if iou[dind,gind] < curr_iou:
+                                    continue
+                                # if match successful and best so far, store appropriately
+                                curr_iou = iou[dind,gind]
+                                m = gind
                         
                         if return_matching and not match_by_bbox:
                             assigned_pairs.append((d, gt[m], curr_iou if (m != -1 and gtIg[m] != 1) else np.nan))
@@ -936,6 +951,11 @@ class COCOeval:
             # if iou_i == 3:
             #     print(image_results)
         
+        # breakpoint()
+
+        # if len(dt) > 1 or len(gt) > 1:
+        #     print(image_results)
+
         return image_results
 
     def accumulate(self, p = None):
@@ -1011,6 +1031,7 @@ class COCOeval:
                         fps = np.logical_and(dtm < 0, np.logical_not(dtIg))
                         tp_sum = np.cumsum(tps, axis=1).astype(dtype=np.float64)
                         fp_sum = np.cumsum(fps, axis=1).astype(dtype=np.float64)
+                        # breakpoint()
                         # print(tps.shape, fps.shape, tp_sum.shape, fp_sum.shape)
                         for t, (tp, fp) in enumerate(zip(tp_sum, fp_sum)):
                             tp = np.array(tp)
@@ -1053,7 +1074,7 @@ class COCOeval:
             'precision': precision,
             'recall':   recall,
             'scores': scores,
-        }
+        }      
 
         toc = time.time()
         print('DONE (t={:0.2f}s).'.format( toc-tic))

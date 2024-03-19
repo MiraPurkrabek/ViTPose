@@ -11,6 +11,7 @@
 # IN_DATA="../data/CrowdedPose/COCO-like/"
 # IN_DATA="../data/pose_experiments/stretch/"
 # IN_DATA="../data/FACIS/bottom_view/"
+IN_DATA="../data/OOI_eval/solo_dance/frames/cropped_images_black/"
 
 DET_MODEL="htc"
 
@@ -29,17 +30,20 @@ elif [ "$DET_MODEL" == "mask2former" ]; then
 fi
 
 # POSE_CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192.py"
-POSE_CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_huge_coco_256x192.py"
+# POSE_CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_huge_coco_256x192.py"
+POSE_CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_full_blackout_finetune.py"
+
+
 # POSE_PTH="models/pretrained/vitpose-s.pth"
-POSE_PTH="models/pretrained/vitpose-h-multi-coco.pth"
-# POSE_PTH="work_dirs/ViTPose_small_combo_finetune_3kTOP_rotated_256x192/best_AP_epoch_463.pth"
-# POSE_PTH="work_dirs/ViTPose_small_combo_finetune_3kBOTTOM_rotated_256x192/best_AP_epoch_241.pth"
-# POSE_PTH="work_dirs/ViTPose_huge_combo_finetune_3kBOTOM_rotated_256x192/best_AP_epoch_17.pth"
+# POSE_PTH="models/pretrained/vitpose-h-multi-coco.pth"
+POSE_PTH="work_dirs/ViTPose_small_coco_256x192_full_blackout_finetune/cropped_best_AP_epoch_5.pth"
 
 
 # OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_ViTPose-s"
+# OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_ViTPose-s_full_blackout_finetune"
+OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_ViTPose-s_full_blackout_finetune_iterative"
 # OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_ViTPose-s-RePoGen_bottom"
-OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_ViTPose-h-multi-coco"
+# OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_ViTPose-h-multi-coco"
 # OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_ViTPose-h-RePoGen_bottom"
 # OUT_DATA="$IN_DATA/output/DET_manual_POSE_ViTPose-h"
 # OUT_DATA="$IN_DATA/output/DET_${DET_MODEL}_POSE_3kTOP_rotated"

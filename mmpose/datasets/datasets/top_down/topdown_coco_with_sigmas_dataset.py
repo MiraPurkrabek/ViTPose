@@ -1,8 +1,10 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import os
 import os.path as osp
 import tempfile
 import warnings
 from collections import OrderedDict, defaultdict
+import copy
 
 import json_tricks as json
 import numpy as np
@@ -17,7 +19,7 @@ from ..base import Kpt2dSviewRgbImgTopDownDataset
 
 
 @DATASETS.register_module()
-class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
+class TopDownCocoWithSigmasDataset(Kpt2dSviewRgbImgTopDownDataset):
     """CocoDataset dataset for top-down pose estimation.
 
     "Microsoft COCO: Common Objects in Context", ECCV'2014.
@@ -93,8 +95,36 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
 
         self.db = self._get_db()
 
+        self.images_loaded = np.zeros(len(self.db), dtype=np.bool_)
+        self.ann_sigmas = {}
+        if osp.exists("ann_sigmas.json"):
+            os.remove("ann_sigmas.json")
+
         print(f'=> num_images: {self.num_images}')
         print(f'=> load {len(self.db)} samples')
+
+    def _update_sigmas(self):
+        try:
+            with open("ann_sigmas.json", 'r') as f:
+                self.ann_sigmas = json.load(f)
+                print("Sigmas updated in the dataset")            
+        except FileNotFoundError:
+            print("Sigmas NOT updated in the dataset due to some error")            
+            pass
+
+    def __getitem__(self, idx):
+        """Get the sample given index."""
+        
+        results = copy.deepcopy(self.db[idx])
+        results['ann_info'] = self.ann_info
+        
+        if np.all(self.images_loaded):
+            self._update_sigmas()
+        ann_key = results['image_file'] + str(results['bbox_id'])
+        results['self_sigma'] = self.ann_sigmas.get(ann_key, 2.0)
+        self.images_loaded[idx] = True
+
+        return self.pipeline(results)
 
     def _get_db(self):
         """Load dataset."""
@@ -125,10 +155,7 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
         Returns:
             dict: db entry
         """
-        try:
-            img_ann = self.coco.loadImgs(img_id)[0]
-        except TypeError:
-            img_ann = self.coco.loadImgs([img_id])[0]
+        img_ann = self.coco.loadImgs(img_id)[0]
         width = img_ann['width']
         height = img_ann['height']
         num_joints = self.ann_info['num_joints']
@@ -181,7 +208,8 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
                 'joints_3d_visible': joints_3d_visible,
                 'dataset': self.dataset_name,
                 'bbox_score': 1,
-                'bbox_id': bbox_id
+                'bbox_id': bbox_id,
+                'propagate': [0],
             })
             bbox_id = bbox_id + 1
 
@@ -226,7 +254,8 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
                 'dataset': self.dataset_name,
                 'joints_3d': joints_3d,
                 'joints_3d_visible': joints_3d_visible,
-                'bbox_id': bbox_id
+                'bbox_id': bbox_id,
+                'propagate': [0],
             })
             bbox_id = bbox_id + 1
         print(f'=> Total boxes after filter '
@@ -330,8 +359,6 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
                 valid_kpts.append([img_kpts[_keep] for _keep in keep])
             else:
                 valid_kpts.append(img_kpts)
-
-        # breakpoint()
 
         self._write_coco_keypoint_results(valid_kpts, res_file)
 

@@ -3,6 +3,7 @@ from .builder import DATASETS, PIPELINES, build_dataloader, build_dataset
 from .dataset_info import DatasetInfo
 from .pipelines import Compose
 from .samplers import DistributedSampler
+from .combined_dataset import CombinedDataset
 
 from .datasets import (  # isort:skip
     AnimalATRWDataset, AnimalFlyDataset, AnimalHorse10Dataset,
@@ -38,5 +39,6 @@ __all__ = [
     'AnimalFlyDataset', 'AnimalLocustDataset', 'AnimalZebraDataset',
     'AnimalATRWDataset', 'AnimalPoseDataset', 'TopDownH36MDataset',
     'TopDownPoseTrack18VideoDataset', 'build_dataloader', 'build_dataset',
-    'Compose', 'DistributedSampler', 'DATASETS', 'PIPELINES', 'DatasetInfo'
+    'Compose', 'DistributedSampler', 'DATASETS', 'PIPELINES', 'DatasetInfo',
+    'CombinedDataset'
 ]

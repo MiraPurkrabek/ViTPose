@@ -6,7 +6,6 @@ from mmcv.cnn import (build_conv_layer, build_norm_layer, build_upsample_layer,
 import numpy as np
 import sklearn.metrics as metrics
 
-
 from mmpose.core.evaluation import pose_pck_accuracy
 from mmpose.core.post_processing import flip_back
 from mmpose.models.builder import build_loss
@@ -18,11 +17,10 @@ from .topdown_heatmap_base_head import TopdownHeatmapBaseHead
 
 
 @HEADS.register_module()
-class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
-    """Top-down heatmap simple head. paper ref: Bin Xiao et al. ``Simple
-    Baselines for Human Pose Estimation and Tracking``.
+class TopdownHeatmapProbSimpleHead(TopdownHeatmapBaseHead):
+    """Top-down probability map simple head.
 
-    TopdownHeatmapSimpleHead is consisted of (>=0) number of deconv layers
+    TopdownProbabilityMapSimpleHead is consisted of (>=0) number of deconv layers
     and a simple conv2d layer.
 
     Args:
@@ -65,7 +63,9 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                  test_cfg=None,
                  upsample=0,
                  normalize=False,
-                 use_prelu=False):
+                 use_prelu=False,
+                 freeze_kpt_head=False,
+                 freeze_prob_head=False,):
         super().__init__()
 
         self.in_channels = in_channels
@@ -82,7 +82,6 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
 
         if use_prelu:
             self.nonlinearity = nn.PReLU()
-            # self.nonlinearity = nn.ReLU(inplace=True)
         else:
             self.nonlinearity = nn.ReLU(inplace=True)
 
@@ -161,8 +160,45 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
         if normalize:
             self.final_layer = nn.Sequential(self.final_layer, Sigmoid())
 
+        if freeze_kpt_head:
+            for param in self.deconv_layers.parameters():
+                param.requires_grad = False
+            for param in self.final_layer.parameters():
+                param.requires_grad = False
 
-    def get_loss(self, output, target, target_weight, reduction='mean'):
+        ppb_layers = []
+        kernel_sizes = [(4, 3), (2, 2), (2, 2)]
+        for i in range(len(kernel_sizes)):
+            ppb_layers.append(
+                build_conv_layer(
+                    dict(type='Conv2d'),
+                    in_channels=in_channels,
+                    out_channels=in_channels,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1))
+            ppb_layers.append(
+                build_norm_layer(dict(type='BN'), in_channels)[1])
+            ppb_layers.append(
+                nn.MaxPool2d(kernel_size=kernel_sizes[i], stride=kernel_sizes[i], padding=0))
+            ppb_layers.append(self.nonlinearity)
+        ppb_layers.append(
+            build_conv_layer(
+                dict(type='Conv2d'),
+                in_channels=384,
+                out_channels=out_channels,
+                kernel_size=1,
+                stride=1,
+                padding=0))
+        ppb_layers.append(nn.Sigmoid())
+        self.probability_layers = nn.Sequential(*ppb_layers)
+
+        if freeze_prob_head:
+            for param in self.probability_layers.parameters():
+                param.requires_grad = False
+
+
+    def get_loss(self, output, target, target_weight):
         """Calculate top-down keypoint loss.
 
         Note:
@@ -177,12 +213,23 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
             target_weight (torch.Tensor[N,K,1]):
                 Weights across different joint types.
         """
+        # output = output[:, :, :-1] # Remove the last channel as it is not part of the heatmap
+        # output = output.reshape((output.shape[0], output.shape[1], 64, 48))
+
+        # target = target[:, :, :-1] # Remove the last channel as it is not part of the heatmap
+        # target = target.reshape((target.shape[0], target.shape[1], 64, 48))
 
         losses = dict()
 
         assert not isinstance(self.loss, nn.Sequential)
-        assert target.dim() == 4 and target_weight.dim() == 3
-        losses['heatmap_loss'] = self.loss(output, target, target_weight, reduction)
+        assert target.dim() == 3 and target_weight.dim() == 3
+        
+        return_dict = True
+        if return_dict:
+            loss = self.loss(output, target, target_weight, return_dict=True)
+            losses.update(loss)
+        else:
+            losses['heatmap_loss'] = self.loss(output, target, target_weight, return_dict=False)
 
         return losses
 
@@ -202,6 +249,16 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                 Weights across different joint types.
         """
 
+        # Get the (out-of-image) probability
+        dt_probs = output[:, :, -1].detach().cpu().numpy().squeeze()
+        gt_probs = target[:, :, -1].detach().cpu().numpy().squeeze()
+
+        output = output[:, :, :-1] # Remove the last channel as it is not part of the heatmap
+        output = output.reshape((output.shape[0], output.shape[1], 64, 48))
+
+        target = target[:, :, :-1] # Remove the last channel as it is not part of the heatmap
+        target = target.reshape((target.shape[0], target.shape[1], 64, 48))
+
         accuracy = dict()
 
         if self.target_type == 'GaussianHeatmap':
@@ -211,26 +268,44 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                 target_weight.detach().cpu().numpy().squeeze(-1) > 0)
             accuracy['acc_pose'] = float(avg_acc)
 
-            o = output.detach().cpu().numpy()
-            t = target.detach().cpu().numpy()
-            dt_probs = np.max(o, axis=(2, 3)).squeeze()
-            gt_probs = np.max(t, axis=(2, 3)).squeeze()
-            gt_probs[gt_probs < 0.9] = 0
-            roc_auc = metrics.roc_auc_score(gt_probs.round().flatten(), dt_probs.flatten())
+            # Calculate the accuracy for the out-of-image probability
+            roc_auc = metrics.roc_auc_score(gt_probs.flatten(), dt_probs.flatten())
             accuracy['roc_auc'] = float(roc_auc)
-            accuracy['mean_gt_prob'] = float(np.mean(gt_probs.round().flatten()))
+
+            accuracy['mean_gt_prob'] = float(gt_probs.flatten().mean())
+
+            
 
         return accuracy
 
     def forward(self, x):
         """Forward function."""
+        x_htm = self.forward_heatmap(x)
+        x_pred = self.forward_probability(x)
+        
+        # Normalize the probability map
+        B, C, H, W = x_htm.shape
+        x_htm = x_htm.reshape((B, C, -1))
+        x_pred = x_pred.reshape((B, C, -1))
+        x_all = torch.cat((x_htm, x_pred), dim=2)
+        
+        return x_all
+    
+    def forward_heatmap(self, x):
+        """Forward fucntion for heatmap prediction."""
+        x = x.clone()
         x = self._transform_inputs(x)
         x = self.deconv_layers(x)
         x = self.final_layer(x)
-
         return x
+    
+    def forward_probability(self, x):
+        """Forward function for out-of-image probability prediction."""
+        y = x.clone()
+        y = self.probability_layers(y)
+        return y
 
-    def inference_model(self, x, flip_pairs=None, return_probs=False, **kwargs):
+    def inference_model(self, x, flip_pairs=None, return_probs=False):
         """Inference function.
 
         Returns:
@@ -242,26 +317,45 @@ class TopdownHeatmapSimpleHead(TopdownHeatmapBaseHead):
                 Pairs of keypoints which are mirrored.
         """
         output = self.forward(x)
+        B, C, _ = output.shape
+        ooi_prob = output[:, :, -1].detach().cpu().numpy() # Get the out-of-image probability        
+        output = output[:, :, :-1] # Remove the last channel as it is not part of the heatmap
+        output = output.reshape((B, C, 64, 48))
 
+        # breakpoint()
+        
         if flip_pairs is not None:
             output_heatmap = flip_back(
                 output.detach().cpu().numpy(),
                 flip_pairs,
                 target_type=self.target_type)
+            
+            # Flip back OOI probabilities
+            ooi_prob_flipped = ooi_prob.copy()
+            for left, right in flip_pairs:
+                ooi_prob_flipped[:, [left, right]] = ooi_prob_flipped[:, [right, left]]
+            ooi_prob = ooi_prob_flipped
+
             # feature is not aligned, shift flipped heatmap for higher accuracy
             if self.test_cfg.get('shift_heatmap', False):
                 output_heatmap[:, :, :, 1:] = output_heatmap[:, :, :, :-1]
         else:
             output_heatmap = output.detach().cpu().numpy()
 
-        B, K, H, W = output_heatmap.shape
-        # output_heatmap /= 2 * np.pi * 2**2
-        probs = np.zeros((B, K), dtype=np.float32)
+        
+        # Normalize the heatmap
+        # breakpoint()
+        
+        # htm_sum = output_heatmap.reshape((B, C, -1)).sum(axis=2) # Get the heatmap sum 
+        # mask = (htm_sum > 0) & (ooi_prob > 0)     # Get the mask for the heatmap sum
+        # alphas = htm_sum / (ooi_prob) # Calculate the alpha values
+        # output_heatmap[mask, :, :] /= alphas[mask, None, None]
 
         if return_probs:
-            return output_heatmap, probs
+            return output_heatmap, ooi_prob
         else:
             return output_heatmap
+        
 
     def _init_inputs(self, in_channels, in_index, input_transform):
         """Check and initialize input transforms.

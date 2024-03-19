@@ -5,28 +5,48 @@ COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 VAL_COCO_ROOT = COCO_ROOT
 
 
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 PADDING = 1.25
 
-_base_ = [
-    '../../../../../_base_/default_runtime.py',
-    '../../../../../_base_/datasets/coco.py'
-]
-evaluation = dict(interval=10, metric='mAP', save_best='AP')
+prtr = None
+load_from = "models/my/reproduce_epoch_205.pth"
 
-optimizer = dict(
-    type='Adam',
-    lr=5e-4,
-)
-optimizer_config = dict(grad_clip=None)
+_base_ = [
+    '../../../../_base_/default_runtime.py',
+    '../../../../_base_/datasets/coco.py'
+]
+evaluation = dict(interval=1, metric='mAP', save_best='AP')
+
+optimizer = dict(type='AdamW', lr=5e-4, betas=(0.9, 0.999), weight_decay=0.1,
+                 constructor='LayerDecayOptimizerConstructor', 
+                 paramwise_cfg=dict(
+                                    num_layers=12, 
+                                    layer_decay_rate=0.8,
+                                    custom_keys={
+                                            'bias': dict(decay_multi=0.),
+                                            'pos_embed': dict(decay_mult=0.),
+                                            'relative_position_bias_table': dict(decay_mult=0.),
+                                            'norm': dict(decay_mult=0.)
+                                            }
+                                    )
+                )
+
+optimizer_config = dict(grad_clip=dict(max_norm=1., norm_type=2))
+
 # learning policy
 lr_config = dict(
     policy='step',
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=0.001,
-    step=[170, 200])
-total_epochs = 210
+    step=[35, 45])
+total_epochs = 50
+log_config = dict(
+    interval=50,
+    hooks=[
+        dict(type='TextLoggerHook'),
+        dict(type='TensorboardLoggerHook')
+    ])
 target_type = 'GaussianHeatmap'
 channel_cfg = dict(
     num_output_channels=17,
@@ -41,44 +61,47 @@ channel_cfg = dict(
 # model settings
 model = dict(
     type='TopDown',
-    pretrained='https://download.openmmlab.com/mmpose/'
-    'pretrain_models/hrnet_w48-8ef0771d.pth',
+    pretrained=prtr,
     backbone=dict(
-        type='HRNet',
-        in_channels=3,
-        extra=dict(
-            stage1=dict(
-                num_modules=1,
-                num_branches=1,
-                block='BOTTLENECK',
-                num_blocks=(4, ),
-                num_channels=(64, )),
-            stage2=dict(
-                num_modules=1,
-                num_branches=2,
-                block='BASIC',
-                num_blocks=(4, 4),
-                num_channels=(48, 96)),
-            stage3=dict(
-                num_modules=4,
-                num_branches=3,
-                block='BASIC',
-                num_blocks=(4, 4, 4),
-                num_channels=(48, 96, 192)),
-            stage4=dict(
-                num_modules=3,
-                num_branches=4,
-                block='BASIC',
-                num_blocks=(4, 4, 4, 4),
-                num_channels=(48, 96, 192, 384))),
+        type='ViT',
+        img_size=(256, 192),
+        patch_size=16,
+        embed_dim=384,
+        depth=12,
+        num_heads=12,
+        ratio=1,
+        use_checkpoint=False,
+        mlp_ratio=4,
+        qkv_bias=True,
+        drop_path_rate=0.1,
+        frozen_stages=11,
+        freeze_attn=True,
+        freeze_ffn=True,
     ),
     keypoint_head=dict(
-        type='TopdownHeatmapSimpleHead',
-        in_channels=48,
+        type='TopdownHeatmapFullHead',
+        in_channels=384,
         out_channels=channel_cfg['num_output_channels'],
-        num_deconv_layers=0,
+        num_deconv_layers=2,
+        num_deconv_filters=(256, 256),
+        num_deconv_kernels=(4, 4),
         extra=dict(final_conv_kernel=1, ),
-        loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)),
+        in_index=0,
+        input_transform=None,
+        align_corners=False,
+        upsample=0,
+        train_cfg=None,
+        test_cfg=None,
+        
+        loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True),
+        loss_probability=dict(type='BCELoss', use_target_weight=False),
+        loss_error=dict(type='L1LogLoss', use_target_weight=True),
+        normalize=True,
+        use_prelu=False,
+        freeze_localization_head=False,
+        freeze_probability_head=False,
+        freeze_error_head=False,
+    ),
     train_cfg=dict(),
     test_cfg=dict(
         flip_test=True,
@@ -101,7 +124,8 @@ data_cfg = dict(
     vis_thr=0.2,
     use_gt_bbox=True,
     det_bbox_thr=0.0,
-    bbox_file=None,
+    # bbox_file=VAL_COCO_ROOT + "/annotations/coco_val_perfect_dets.json",
+    bbox_file=VAL_COCO_ROOT + "/annotations/person_keypoints_val2017.json",
 )
 
 train_pipeline = [
@@ -112,8 +136,9 @@ train_pipeline = [
         num_joints_half_body=8,
         prob_half_body=0.3),
     dict(
-        type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.5),
+        type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.3),
     dict(type='TopDownAffine', use_udp=True),
+    # dict(type='RandomBlackMask', mask_prob=0.9, min_mask=0.1, max_mask=0.3),
     dict(type='ToTensor'),
     dict(
         type='NormalizeTensor',
@@ -123,7 +148,10 @@ train_pipeline = [
         type='TopDownGenerateTarget',
         sigma=2,
         encoding='UDP',
-        target_type=target_type),
+        target_type=target_type,
+        normalize=False,
+        probability_map=True,
+        ignore_zeros=True),
     dict(
         type='Collect',
         keys=['img', 'target', 'target_weight'],
@@ -146,7 +174,7 @@ val_pipeline = [
         keys=['img'],
         meta_keys=[
             'image_file', 'center', 'scale', 'rotation', 'bbox_score',
-            'flip_pairs'
+            'flip_pairs', 'orig_joints_3d', 'joints_3d_visible',
         ]),
 ]
 
@@ -154,10 +182,9 @@ test_pipeline = val_pipeline
 
 data_root = COCO_ROOT
 val_data_root = VAL_COCO_ROOT
-
 data = dict(
     samples_per_gpu=BATCH_SIZE,
-    workers_per_gpu=2,
+    workers_per_gpu=4,
     val_dataloader=dict(samples_per_gpu=BATCH_SIZE),
     test_dataloader=dict(samples_per_gpu=BATCH_SIZE),
     train=dict(
@@ -169,16 +196,17 @@ data = dict(
         dataset_info={{_base_.dataset_info}}),
     val=dict(
         type='TopDownCocoDataset',
-        ann_file=f'{val_data_root}/annotations/person_keypoints_val2017.json',
-        img_prefix=f'{val_data_root}/val2017/',
+        ann_file=f'{VAL_COCO_ROOT}/annotations/person_keypoints_val2017.json',
+        img_prefix=f'{VAL_COCO_ROOT}/val2017/',
         data_cfg=data_cfg,
         pipeline=val_pipeline,
         dataset_info={{_base_.dataset_info}}),
     test=dict(
         type='TopDownCocoDataset',
-        ann_file=f'{val_data_root}/annotations/person_keypoints_val2017.json',
-        img_prefix=f'{val_data_root}/val2017/',
+        ann_file=f'{VAL_COCO_ROOT}/annotations/person_keypoints_val2017.json',
+        img_prefix=f'{VAL_COCO_ROOT}/val2017/',
         data_cfg=data_cfg,
         pipeline=test_pipeline,
         dataset_info={{_base_.dataset_info}}),
 )
+

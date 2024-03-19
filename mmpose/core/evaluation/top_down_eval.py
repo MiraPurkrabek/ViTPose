@@ -86,12 +86,14 @@ def _get_max_preds(heatmaps):
     heatmaps_reshaped = heatmaps.reshape((N, K, -1))
     idx = np.argmax(heatmaps_reshaped, 2).reshape((N, K, 1))
     maxvals = np.amax(heatmaps_reshaped, 2).reshape((N, K, 1))
+    # maxvals = np.sum(heatmaps_reshaped, axis=2).reshape((N, K, 1))
+
 
     preds = np.tile(idx, (1, 1, 2)).astype(np.float32)
     preds[:, :, 0] = preds[:, :, 0] % W
     preds[:, :, 1] = preds[:, :, 1] // W
 
-    preds = np.where(np.tile(maxvals, (1, 1, 2)) > 0.0, preds, -1)
+    # preds = np.where(np.tile(maxvals, (1, 1, 2)) > 0.0, preds, -1)
     return preds, maxvals
 
 
@@ -622,7 +624,7 @@ def keypoints_from_heatmaps(heatmaps,
     if post_process == 'megvii':
         maxvals = maxvals / 255.0 + 0.5
 
-    return preds, maxvals
+    return preds, maxvals#/(2*np.pi*4)
 
 
 def keypoints_from_heatmaps3d(heatmaps, center, scale):

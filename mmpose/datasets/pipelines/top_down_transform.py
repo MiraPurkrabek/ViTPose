@@ -198,18 +198,20 @@ class RandomBlackMask:
             Default: 1.0
     """
 
-    def __init__(self, min_mask=0.0, max_mask=0.5, mask_prob=1.0):
+    def __init__(self, min_mask=0.0, max_mask=0.5, mask_prob=1.0, min_kpts=6):
         self.min_mask = min_mask
         self.max_mask = max_mask
         self.mask_prob = mask_prob
+        self.min_kpts = min_kpts
 
     def __call__(self, results):
         """Perform data augmentation with random masking."""
         img = results['img']
-        
-        if np.random.rand() < self.mask_prob:
-            kpts = np.array(results['joints_3d'])
-            kpts_visible = np.array(results['joints_3d_visible'])
+        kpts = np.array(results['joints_3d'])
+        kpts_visible = np.array(results['joints_3d_visible'])
+        num_vis_kpts = np.sum(kpts_visible[:, 0] > 0)
+
+        if num_vis_kpts >= self.min_kpts and np.random.rand() < self.mask_prob:
 
             # Generate random rectangle to keep
             h, w, _ = img.shape
@@ -261,6 +263,7 @@ class TopDownAffine:
         c = results['center']
         s = results['scale']
         r = results['rotation']
+        results["orig_joints_3d"] = joints_3d.copy()
 
         if self.use_udp:
             trans = get_warp_matrix(r, c * 2.0, image_size - 1.0, s * 200.0)
@@ -345,8 +348,10 @@ class TopDownGenerateTarget:
                  unbiased_encoding=False,
                  valid_visibilities=[1, 2],
                  ignore_zeros=True,
-                 normalize=False):
-        self.sigma = sigma
+                 normalize=False,
+                 probability_map=False,
+                 directional_probabilities=False):
+        self.save_sigma = sigma
         self.unbiased_encoding = unbiased_encoding
         self.kernel = kernel
         self.valid_radius_factor = valid_radius_factor
@@ -355,6 +360,8 @@ class TopDownGenerateTarget:
         self.valid_visibilities = valid_visibilities
         self.ignore_zeros = ignore_zeros
         self.normalize = normalize
+        self.probability_map = probability_map
+        self.directional_probabilities = directional_probabilities
 
     def _msra_generate_target(self, cfg, joints_3d, joints_3d_visible, sigma):
         """Generate the target heatmap via "MSRA" approach.
@@ -488,8 +495,9 @@ class TopDownGenerateTarget:
 
         return heatmaps, target_weight
 
-    def _udp_generate_target(self, cfg, joints_3d, joints_3d_visible, factor,
-                             target_type, valid_visibilities=[1, 2], ignore_zeros=True, normalize=False):
+    def _udp_generate_target(self, cfg, joints_3d, joints_3d_visible, factors,
+                             target_type, valid_visibilities=[1, 2], ignore_zeros=True,
+                             normalize=False, probability_map=False, directional_probabilities=False):
         """Generate the target heatmap via 'UDP' approach. Paper ref: Huang et
         al. The Devil is in the Details: Delving into Unbiased Data Processing
         for Human Pose Estimation (CVPR 2020).
@@ -526,22 +534,47 @@ class TopDownGenerateTarget:
         joint_weights = cfg['joint_weights']
         use_different_joint_weights = cfg['use_different_joint_weights']
 
+        # normalize = normalize or probability_map
+
         target_weight = np.ones((num_joints, 1), dtype=np.float32)
-        # if ignore_zeros:
         target_weight[:, 0] = np.minimum(1, joints_3d_visible[:, 0])
+        
+        prob_is_ooi = False
 
+        if isinstance(ignore_zeros, float):
+            ignore_zeros = np.random.rand() < ignore_zeros
+        assert isinstance(ignore_zeros, bool)
+        
         if target_type.lower() == 'GaussianHeatmap'.lower():
-            target = np.zeros((num_joints, heatmap_size[1], heatmap_size[0]),
-                              dtype=np.float32)
-
-            tmp_size = factor * 3
-
-            # prepare for gaussian
-            size = 2 * tmp_size + 1
-            x = np.arange(0, size, 1, np.float32)
-            y = x[:, None]
+            if probability_map:
+                if directional_probabilities:
+                    target = np.zeros((num_joints, heatmap_size[1]* heatmap_size[0] + 4),
+                                    dtype=np.float32)
+                else:
+                    target = np.zeros((num_joints, heatmap_size[1]* heatmap_size[0] + 1),
+                                    dtype=np.float32)
+                    target[:, -1] = int(prob_is_ooi)
+            else:
+                target = np.zeros((num_joints, heatmap_size[1], heatmap_size[0]),
+                                dtype=np.float32)
 
             for joint_id in range(num_joints):
+                # prepare for gaussian
+                if isinstance(factors, list):
+                    factor = factors[joint_id]
+                else:
+                    factor = factors
+
+                if factor < 1e-4:
+                    factor = self.save_sigma
+
+                tmp_size = factor * 3
+                size = 2 * tmp_size + 1
+                x = np.arange(0, size, 1, np.float32)
+                y = x[:, None]
+                
+                target_2d = np.zeros((heatmap_size[1], heatmap_size[0]),
+                                     dtype=np.float32)
                 vis = int(joints_3d_visible[joint_id, 0])
                 # print(joint_id, joints_3d[joint_id, :], joints_3d_visible[joint_id, :])
                 # print(vis, vis in valid_visibilities, valid_visibilities)
@@ -559,16 +592,9 @@ class TopDownGenerateTarget:
                 mu_x = int(joints_3d[joint_id][0] / feat_stride[0] + 0.5)
                 mu_y = int(joints_3d[joint_id][1] / feat_stride[1] + 0.5)
                 
-                # Check that any part of the gaussian is in-bounds
                 ul = [int(mu_x - tmp_size), int(mu_y - tmp_size)]
                 br = [int(mu_x + tmp_size + 1), int(mu_y + tmp_size + 1)]
-                if ul[0] >= heatmap_size[0] or ul[1] >= heatmap_size[1] \
-                        or br[0] < 0 or br[1] < 0:
-                    # If not, just return the image as is
-                    if ignore_zeros:
-                        target_weight[joint_id] = 0
-                    continue
-
+                     
                 # # Generate gaussian
                 mu_x_ac = joints_3d[joint_id][0] / feat_stride[0]
                 mu_y_ac = joints_3d[joint_id][1] / feat_stride[1]
@@ -577,9 +603,48 @@ class TopDownGenerateTarget:
                 y0 += mu_y_ac - mu_y
                 g = np.exp(-((x - x0)**2 + (y - y0)**2) / (2 * factor**2))
                 
+                sum_max_value = 2 * np.pi * factor**2
+                max_value = 1
                 if normalize:
                     g /= 2 * np.pi * factor**2
-                
+                    sum_max_value = 1
+                    max_value = 1/(2 * np.pi * factor**2)
+
+
+                if directional_probabilities:
+                    top_prob_ratio = min(abs(heatmap_size[1]/2 - ul[1]) / (2*tmp_size+1), 1)
+                    right_prob_ratio = min(abs(heatmap_size[0]/2 - ul[0]) / (2*tmp_size+1), 1)
+                    if ul[0] > heatmap_size[0]/2:
+                        right_prob_ratio = 0
+                    if ul[1] > heatmap_size[1]/2:
+                        top_prob_ratio = 0
+                    
+                    bottom_prob_ratio = 1-top_prob_ratio
+                    left_prob_ratio = 1-right_prob_ratio
+                    out_of_image_ratios = np.array([
+                        top_prob_ratio * right_prob_ratio,
+                        top_prob_ratio * left_prob_ratio,
+                        bottom_prob_ratio * right_prob_ratio,
+                        bottom_prob_ratio * left_prob_ratio
+                    ])
+
+                    # breakpoint()
+                    assert np.allclose(out_of_image_ratios.sum(), 1)
+                    assert np.all(out_of_image_ratios >= 0)
+    
+                # Check that any part of the gaussian is in-bounds
+                if ul[0] >= heatmap_size[0] or ul[1] >= heatmap_size[1] \
+                        or br[0] < 0 or br[1] < 0:
+                    
+                    # If not, just return the image as is
+                    if ignore_zeros:
+                        target_weight[joint_id] = 0
+
+                    if directional_probabilities:
+                        target[joint_id, -4:] = out_of_image_ratios
+                    
+                    continue   
+                    
                 # Usable gaussian range
                 g_x = max(0, -ul[0]), min(br[0], heatmap_size[0]) - ul[0]
                 g_y = max(0, -ul[1]), min(br[1], heatmap_size[1]) - ul[1]
@@ -590,8 +655,45 @@ class TopDownGenerateTarget:
                 v = vis
                 # v = target_weight[joint_id]
                 if v > 0.5:
-                    target[joint_id][img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
+                    target_2d[img_y[0]:img_y[1], img_x[0]:img_x[1]] = \
                         g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
+                
+                if probability_map:
+                    target_2d = target_2d.flatten()
+                    
+                    # out_of_image_prob = (target_2d.max() / max_value).round()
+                    # out_of_image_prob = (sum_max_value - np.sum(target_2d)) / sum_max_value
+
+                    out_of_image_prob = np.array([1])
+                    if mu_x_ac < 0 or mu_x_ac >= heatmap_size[0] or mu_y_ac < 0 or mu_y_ac >= heatmap_size[1]:
+                        out_of_image_prob = np.array([0])
+                    
+                    if prob_is_ooi:
+                        out_of_image_prob = 1 - out_of_image_prob
+
+                    if directional_probabilities:
+                        out_of_image_prob = out_of_image_ratios * out_of_image_prob
+
+                    # tgt_draw = target_2d.reshape(heatmap_size[1], heatmap_size[0]) * 255
+                    # tgt_draw -= tgt_draw.min()
+                    # tgt_draw /= tgt_draw.max()
+                    # tgt_draw *= 255
+                    # tgt_draw = tgt_draw.astype(np.uint8)
+                    # tgt_draw = cv2.applyColorMap(tgt_draw, cv2.COLORMAP_JET)
+                    # cv2.imwrite('TargetTest/target_2d_{}.png'.format(joint_id), tgt_draw)
+                    
+                    # assert out_of_image_prob >= 0 and out_of_image_prob <= 1
+                    target_w_pbt = np.append(target_2d, out_of_image_prob.flatten())
+                    # assert np.allclose(target_w_pbt.sum(), 1)
+                    # if not np.allclose(target_w_pbt.sum(), 1):
+                    #     print("target_w_pbt.sum() != 1", target_w_pbt.sum())
+                    #     print("target_2d.sum()", target_2d.sum())
+                    #     print("out_of_image_prob", out_of_image_prob)
+                    # assert np.allclose(target_w_pbt.sum(), 1)
+                    # assert np.all(target_w_pbt >= 0)
+                    target[joint_id] = target_w_pbt
+                else:
+                    target[joint_id] = target_2d
                     
 
         elif target_type.lower() == 'CombinedTarget'.lower():
@@ -607,7 +709,7 @@ class TopDownGenerateTarget:
             feat_y_int = feat_y_int.flatten()
             # Calculate the radius of the positive area in classification
             #   heatmap.
-            valid_radius = factor * heatmap_size[1]
+            valid_radius = factors * heatmap_size[1]
             feat_stride = (image_size - 1.0) / (heatmap_size - 1.0)
             for joint_id in range(num_joints):
                 mu_x = joints_3d[joint_id][0] / feat_stride[0]
@@ -636,6 +738,8 @@ class TopDownGenerateTarget:
         """Generate the target heatmap."""
         joints_3d = results['joints_3d']
         joints_3d_visible = results['joints_3d_visible']
+
+        self.sigma = results.get('self_sigma', self.save_sigma)
 
         assert self.encoding in ['MSRA', 'Megvii', 'UDP']
 
@@ -691,28 +795,31 @@ class TopDownGenerateTarget:
             else:
                 raise ValueError('target_type should be either '
                                  "'GaussianHeatmap' or 'CombinedTarget'")
-            if isinstance(factors, list):
-                num_factors = len(factors)
-                cfg = results['ann_info']
-                num_joints = cfg['num_joints']
-                W, H = cfg['heatmap_size']
+            # if isinstance(factors, list):
+            #     num_factors = len(factors)
+            #     cfg = results['ann_info']
+            #     num_joints = cfg['num_joints']
+            #     W, H = cfg['heatmap_size']
 
-                target = np.empty((0, channel_factor * num_joints, H, W),
-                                  dtype=np.float32)
-                target_weight = np.empty((0, num_joints, 1), dtype=np.float32)
-                for i in range(num_factors):
-                    target_i, target_weight_i = self._udp_generate_target(
-                        cfg, joints_3d, joints_3d_visible, factors[i],
-                        self.target_type, self.valid_visibilities, self.ignore_zeros,
-                        self.normalize)
-                    target = np.concatenate([target, target_i[None]], axis=0)
-                    target_weight = np.concatenate(
-                        [target_weight, target_weight_i[None]], axis=0)
-            else:
-                target, target_weight = self._udp_generate_target(
-                    results['ann_info'], joints_3d, joints_3d_visible, factors,
-                    self.target_type, self.valid_visibilities, self.ignore_zeros,
-                    self.normalize)
+            #     target = np.empty((0, channel_factor * num_joints, H, W),
+            #                       dtype=np.float32)
+            #     target_weight = np.empty((0, num_joints, 1), dtype=np.float32)
+            #     targets = []
+            #     target_weights = []
+            #     for i in range(num_factors):
+            #         target_i, target_weight_i = self._udp_generate_target(
+            #             cfg, joints_3d, joints_3d_visible, factors[i],
+            #             self.target_type, self.valid_visibilities, self.ignore_zeros,
+            #             self.normalize, self.probability_map, self.directional_probabilities)
+            #         targets.append(target_i[None])
+            #         target_weights.append(target_weight_i[None])
+            #     target = np.concatenate(targets, axis=0)
+            #     target_weight = np.concatenate(target_weights, axis=0)
+            # else:
+            target, target_weight = self._udp_generate_target(
+                results['ann_info'], joints_3d, joints_3d_visible, factors,
+                self.target_type, self.valid_visibilities, self.ignore_zeros,
+                self.normalize, self.probability_map, self.directional_probabilities)
         else:
             raise ValueError(
                 f'Encoding approach {self.encoding} is not supported!')

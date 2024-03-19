@@ -212,12 +212,13 @@ def main():
             model.cuda(),
             device_ids=[torch.cuda.current_device()],
             broadcast_buffers=False)
-        outputs = multi_gpu_test(model, data_loader, args.tmpdir,
-                                 args.gpu_collect, return_heatmaps=True)
+        outputs, _ = multi_gpu_test(model, data_loader, args.tmpdir,
+                                 args.gpu_collect, return_heatmaps=True,
+                                #  return_probs=True,
+                                )
         
 
     print("\nInference done")
-
 
     rank, _ = get_dist_info()
     eval_config = cfg.get('evaluation', {})
@@ -230,13 +231,15 @@ def main():
 
     if rank == 0:
 
+        # print(model)
+
         if args.out:
             print(f'\nwriting results to {args.out}')
             mmcv.dump(outputs, args.out)
 
         config_name = ".".join(os.path.basename(args.config).split(".")[:-1])
         save_dir = os.path.join(
-            cfg.data_root,
+            cfg.VAL_COCO_ROOT,
             # "test_all_visualization",
             "test_visualization",
             config_name,
@@ -264,13 +267,17 @@ def main():
         print("Heatmaps med sum:", np.median(kpts_sums))
         print("Heatmaps min sum:", np.min(kpts_sums))
         print("Heatmaps max sum:", np.max(kpts_sums))
-        plt.hist(kpts_sums.flatten(), bins=100)
-        plt.title("Heatmaps sum histogram")
+        plt.hist(kpts_sums.flatten(), bins=100, log=True)
+        plt.title("Heatmaps sum histogram (log scale)")
         plt.grid(True)
         plt.savefig(osp.join(save_dir, "test_heatmap_sum_histogram.png"))
         plt.cla()
 
-        print("="*20)
+        # plt.hist(np.clip(kpts_sums, 0, 1).flatten(), bins=100, log=True)
+        # plt.title("Heatmaps clipped sum histogram (log scale)")
+        # plt.grid(True)
+        # plt.savefig(osp.join(save_dir, "test_heatmap_sum_clip_histogram.png"))
+        # plt.cla()
 
         # print("="*30)
         # results_per_kpt = dataset.evaluate_per_kpts(outputs, cfg.work_dir, return_score=True, **eval_config)
@@ -279,14 +286,124 @@ def main():
         #     # print("=====", kpts[i], "="*30)
         #     print("{:s} -> {:.1f}".format(kpts[i], 100 * float(result['AP'])))
         # print("="*30)
+
+        outputs_dict = {
+            "preds": np.concatenate([o["preds"] for o in outputs], axis=0),
+            "heatmaps": np.concatenate([o["output_heatmap"] for o in outputs], axis=0),
+            "bboxes": np.concatenate([o["boxes"] for o in outputs], axis=0),
+            "image_paths": np.concatenate([o["image_paths"] for o in outputs], axis=0),
+            "bbox_ids": np.concatenate([o["bbox_ids"] for o in outputs], axis=0),
+            # "probs": np.concatenate([o["output_probs"] for o in outputs], axis=0),
+        }
+
+        confidences = outputs_dict["preds"][:, :, -1].flatten()
+        print("+"*10)
+        print("Confidences avg:", np.mean(confidences))
+        print("Confidences med:", np.median(confidences))
+        print("Confidences min:", np.min(confidences))
+        print("Confidences max:", np.max(confidences))
+        plt.hist(confidences, bins=100, log=True)
+        plt.title("Confidences histogram (log scale)")
+        plt.grid(True)
+        plt.savefig(osp.join(save_dir, "test_confidences_histogram.png"))
+        plt.cla()
+
+        # for i in range(outputs_dict["probs"].shape[2]):
+        #     prob_i = outputs_dict["probs"][:, :, i].flatten()
+        #     print("+"*10)
+        #     print("Probs {:d} avg:".format(i), np.mean(prob_i))
+        #     print("Probs {:d} med:".format(i), np.median(prob_i))
+        #     print("Probs {:d} min:".format(i), np.min(prob_i))
+        #     print("Probs {:d} max:".format(i), np.max(prob_i))
+        #     plt.hist(prob_i, bins=100, log=True)
+        #     plt.title("Probs {:d} histogram (log scale)".format(i))
+        #     plt.grid(True)
+        #     plt.savefig(osp.join(save_dir, "test_probs_{:d}_histogram.png".format(i)))
+        #     plt.cla()
+
+        print("="*20)
+
+        # Replace confidences with ViT-s vanilla ones
+        # reference = json.load(open(os.path.join(save_dir, "..", "ViTPose_small_coco_256x192", "results.json"), "r"))
+        # for batch in outputs:
+        #     for pred, image_path in zip(batch["preds"], batch["image_paths"]):
+        #         for match in reference:
+        #             if match[1]["image_id"] == dataset.name2id[osp.basename(image_path)]: 
+        #                 pred[:, 2] = match[0]["keypoints"][2::3]
+        #                 break
+
+        # breakpoint()
+        # Replace confidence for error estimation
+        # for o in outputs:
+
+        #     conf_errs = o["output_errors"]
+        #     p = o["output_probs"]
+        #     # conf_errs /= 0.3
+        #     conf_errs[p < 0.5] = 1.0
+        #     conf_errs = 1 - conf_errs
+        #     conf_errs = np.clip(conf_errs, 0, 1)
+        #     o["preds"][:, :, -1] = conf_errs.reshape(-1, 17)
+            
+            # conf_errs = o["preds"][:, :, -1] < .2
+            # conf_errs = conf_errs.astype(float)
+            # o["preds"][conf_errs, -1] = -1
+
+            # o["preds"][:, :, -1] = 0.9
+
+            # pass
+
+        results, sorted_matches, sort_idx = dataset.evaluate(outputs, cfg.work_dir, return_score=True, **eval_config)
         
-        results, sorted_matches = dataset.evaluate(outputs, cfg.work_dir, return_score=True, **eval_config)
+
+        # Save results as a detailed json
+        results_path = os.path.join(save_dir, "results.json")
+        print("Saving the results to {}".format(results_path))
+        
+        sorted_matches_to_save = sorted_matches.tolist()
+        for m in sorted_matches_to_save:
+            for mm in m[:2]:
+                if 'keypoints' in mm.keys():
+                    del mm['keypoints']
+                if 'visibilities' in mm.keys():
+                    del mm['visibilities']
+                if 'bbox' in mm.keys():
+                    del mm['bbox']
+                
+                for key, value in mm.items():
+                    if isinstance(value, np.ndarray):
+                        mm[key] = value.tolist()
+                
+        with open(results_path, "w") as f:
+            json.dump(sorted_matches_to_save, f)
+        print("Results saved")
+        
+        i2idx = {}
+        for i, match in enumerate(sorted_matches):
+            dt = match[0]
+            matched = False
+            image_name = dataset.id2name[dt["image_id"]]
+            idx = 0
+            for bbox, htm, image_path in zip(outputs_dict["bboxes"], outputs_dict["heatmaps"], outputs_dict["image_paths"]):
+                pred_img_name = osp.basename(image_path)
+                if pred_img_name == image_name:
+                    pred_bbox_center = bbox[:2].astype(int)
+                    dt_bbox_center = np.array(dt["center"]).astype(int)
+                    if np.abs(pred_bbox_center - dt_bbox_center).sum() < 2:
+                        i2idx[i] = idx 
+                        matched = True
+                        break
+                idx += 1
+            if not matched:
+                i2idx[i] = None
+            
+
         print("Number of sorted matches:", len(sorted_matches))
         oks_list = np.array([m[2] for m in sorted_matches])
         print("Dataset evaluated")
+        # breakpoint()
 
         # Try to load dict with views
-        views_dict_path = os.path.join(cfg.data_root, "annotations", "views.json")
+        views_dict_path = os.path.join(cfg.VAL_COCO_ROOT, "annotations", "views.json")
         views_dict = None
         if os.path.exists(views_dict_path) and os.path.isfile(views_dict_path):
             views_dict = json.load(open(views_dict_path, "r"))
@@ -297,7 +414,7 @@ def main():
                 views_dict[img_name]["oks_score"] = float(img_score_dict[img_name])
             
             # Save views dict
-            views_dict_path = os.path.join(cfg.data_root, "annotations", "views_w_oks.json")
+            views_dict_path = os.path.join(cfg.VAL_COCO_ROOT, "annotations", "views_w_oks.json")
             print("Saving the views dict to {}".format(views_dict_path))
             json.dump(views_dict, open(views_dict_path, "w"), indent=2)
         # else:
@@ -306,7 +423,7 @@ def main():
             
         #     for i, ann in enumerate(coco_dict_with_oks["annotations"]):
         #         ann["oks"] = float(oks_list[i])
-        #     coco_dict_with_oks_path = os.path.join(cfg.data_root, "annotations", "coco_dict_with_oks.json")
+        #     coco_dict_with_oks_path = os.path.join(save_dir, "coco_dict_with_oks.json")
         #     print("Saving the coco with OKS dict to {}".format(coco_dict_with_oks_path))
         #     with open(coco_dict_with_oks_path, "w") as f:
         #         json.dump(coco_dict_with_oks, f, indent=2)
@@ -314,6 +431,8 @@ def main():
         # Save score histogram
         hist_oks_score = np.clip(oks_list, 0, 1)
         plt.hist(hist_oks_score, bins=100)
+        plt.grid(True)
+        plt.title("OKS score histogram")
         plt.savefig(os.path.join(save_dir, "test_score_histogram.png"))
         plt.cla()
 
@@ -324,7 +443,7 @@ def main():
         num_non_nan = (np.isnan(oks_list) == False).sum()
         print("There is {:d} non-NaN OKS scores out of {:d} samples".format(num_non_nan, len(oks_list)))
 
-        draw_all = True
+        draw_all = False
         if draw_all: 
             num_images = len(oks_list)
             indices_to_draw = list(range(num_images))
@@ -361,6 +480,7 @@ def main():
         #     with open(os.path.join(worst_save_dir, os.pardir, "{}_hard_negatives.json".format(config_name)), "w") as f:
         #         json.dump(worst_dataset, f, indent=2)            
 
+        return
 
         print("Drawing {:d} images ({:d} available)".format(len(indices_to_draw), len(oks_list)))
         for i in tqdm(indices_to_draw, ascii=True):
@@ -368,13 +488,13 @@ def main():
             oks_score_for_this_sample = score
             
             image_name = dataset.id2name[annotation["image_id"]]
-            image_path = os.path.join(cfg.data_root, "val2017", image_name)
+            image_path = os.path.join(cfg.VAL_COCO_ROOT, "val2017", image_name)
             
             pose_results = []
             gt_pose_results = []
             gt_pose_vis = []
             gt_pose_invis = []
-            heatmaps = []
+            # heatmaps = []
             
             kpt = np.array(annotation["keypoints"]).reshape(17, 3)
             visibility = kpt[:, -1]
@@ -422,21 +542,102 @@ def main():
             # print(output_list[idx]["image_paths"].replace("/", ""), image_path.replace("/", ""))
             assert gt_img_id == dt_img_id, "Image IDs does not equal, {:d} =!= {:d}".format(gt_img_id, dt_img_id)
             # assert output_list[idx]["image_paths"].replace("/", "") == image_path.replace("/", ""), "{:s} =!= {:s}".format(output_list[idx]["image_paths"], image_path)
+            save_img = cv2.imread(image_path)
 
-            # heatmaps = np.array(heatmaps)
-            # for joint_i in range(heatmaps.shape[1]):
-            #     save_path = osp.join(save_dir, "{:04d}_vis_heatmap_{:02d}_{}".format(i, joint_i, image_name))
-            #     joint_heatmap = (heatmaps[:, joint_i, :, :].squeeze()*255)
-            #     joint_heatmap = np.clip(joint_heatmap, 0, 255)#.astype(np.uint8)
-            #     joint_heatmap = cv2.resize(joint_heatmap, (np.array(joint_heatmap.shape) * 4).astype(int))
-            #     mmcv.image.imwrite(joint_heatmap, save_path)
-            #     print(save_path)
-            #     print("Joint {:d}, min {:.2f}, max {:.2f}, conf {:.2f}".format(
-            #         joint_i,
-            #         np.min(joint_heatmap),
-            #         np.max(joint_heatmap),
-            #         pose_results[0]["keypoints"][joint_i, -1] * 255
-            #     ))
+            save_img_htm = save_img.copy()
+            # Crop the bbox
+            # save_img_htm = np.zeros((256, 192, 3), dtype=np.uint8)
+            save_img_htm = cv2.copyMakeBorder(
+                save_img_htm,
+                save_img_htm.shape[0],
+                save_img_htm.shape[0],
+                save_img_htm.shape[1],
+                save_img_htm.shape[1],
+                cv2.BORDER_CONSTANT,
+                value=[0, 0, 0],
+            )
+            x_start = int(bbox_wh[0, 0]) + save_img.shape[1]
+            y_start = int(bbox_wh[0, 1]) + save_img.shape[0]
+            save_img_htm = save_img_htm[
+                y_start:y_start + int(bbox_wh[0, 3]),
+                x_start:x_start + int(bbox_wh[0, 2]),
+                :,
+            ]
+            
+            for joint_i in range(heatmaps.shape[1]):
+                save_path = osp.join(save_dir, "{:04d}_vis_heatmap_{:02d}_{}".format(i, joint_i, image_name))
+                joint_heatmap = (heatmaps[i2idx[i], joint_i, :, :].squeeze())
+                htm_sum = np.sum(joint_heatmap)
+                joint_heatmap = cv2.resize(joint_heatmap, save_img_htm.shape[:2][::-1])
+                coarse_pred = np.array(np.unravel_index(joint_heatmap.argmax(), joint_heatmap.shape))
+                # probs = outputs_dict["probs"][i2idx[i], joint_i, :]
+                normalized_heatmap = False
+                if htm_sum <= 1.2:
+                    normalized_heatmap = True
+
+                htm_sum = pose_results[0]["keypoints"][joint_i, -1]
+                if normalized_heatmap:
+                    joint_heatmap *= 2*np.pi*4
+                joint_heatmap *= 255
+                # joint_heatmap = np.clip(joint_heatmap, 0, 255).astype(np.uint8)
+                joint_heatmap = joint_heatmap.astype(np.uint8)
+                joint_heatmap = cv2.applyColorMap(joint_heatmap, cv2.COLORMAP_JET)
+
+                mask = joint_heatmap > 50
+                tmp_img = save_img_htm.copy()
+                tmp_img[mask] = joint_heatmap[mask]
+                fine_pred = pose_results[0]["keypoints"][joint_i, :2].astype(int)
+                # breakpoint()
+                tmp_img = cv2.drawMarker(
+                    tmp_img,
+                    tuple(coarse_pred[::-1]),
+                    (255, 255, 255),
+                    markerType=cv2.MARKER_CROSS,
+                    markerSize=5,
+                    thickness=1,
+                )
+                tmp_img = cv2.putText(
+                    tmp_img,
+                    "{:.2f}".format(htm_sum),
+                    tuple(coarse_pred[::-1] + 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=0.5,
+                    color=(255, 255, 255),
+                    thickness=2,
+                )
+                tmp_img = cv2.addWeighted(tmp_img, 0.7, save_img_htm, 0.3, 0)
+                
+                # if len(probs) > 0:
+                #     tmp_img = cv2.copyMakeBorder(
+                #         tmp_img,
+                #         20,
+                #         20,
+                #         20,
+                #         20,
+                #         cv2.BORDER_CONSTANT,
+                #         value=[125, 125, 125],
+                #     )
+                # if len(probs) == 1:
+                #     tmp_img[:20, :, :] = 255 * probs[0]
+                #     tmp_img[:, :20, :] = 255 * probs[0]
+                #     tmp_img[-20:, :, :] = 255 * probs[0]
+                #     tmp_img[:, -20:, :] = 255 * probs[0]
+                # elif len(probs) == 4:
+                #     tmp_img[:20, :20, :] = 255 * probs[0]
+                #     tmp_img[-20:, :20, :] = 255 * probs[1]
+                #     tmp_img[:20, -20:, :] = 255 * probs[2]
+                #     tmp_img[-20:, -20:, :] = 255 * probs[3]
+
+                # print(save_path)
+                # print("Joint {:d}, min {:.2f}, max {:.2f}, sum {:.2f}, conf {:.2f}".format(
+                #     joint_i,
+                #     np.min(joint_heatmap),
+                #     np.max(joint_heatmap),
+                #     htm_sum,
+                #     pose_results[0]["keypoints"][joint_i, -1],
+                # ))
+                mmcv.image.imwrite(tmp_img, save_path)
+            # mmcv.image.imwrite(save_img_htm, save_path)
 
             image_basename = ".".join(image_name.split(".")[:-1])
             image_ext = image_name.split(".")[-1]
@@ -460,7 +661,6 @@ def main():
             # )
 
             # If GT or PRED kpts outside of the image, pad the image
-            save_img = cv2.imread(image_path)
             min_x = 0
             min_y = 0
             max_x = save_img.shape[1]

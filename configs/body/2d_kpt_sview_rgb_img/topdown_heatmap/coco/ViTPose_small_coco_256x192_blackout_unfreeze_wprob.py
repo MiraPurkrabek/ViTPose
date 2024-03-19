@@ -1,8 +1,9 @@
-COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
-# COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
 
-VAL_COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
-# VAL_COCO_ROOT = COCO_ROOT
+# VAL_COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+# VAL_COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_mpii_cropped_v2/'
+VAL_COCO_ROOT = COCO_ROOT
 
 
 BATCH_SIZE = 64
@@ -118,7 +119,7 @@ data_cfg = dict(
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='TopDownRandomFlip', flip_prob=0.5),
+    dict(type='TopDownRandomFlip', flip_prob=1.0),
     dict(
         type='TopDownHalfBodyTransform',
         num_joints_half_body=8,

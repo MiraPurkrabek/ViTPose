@@ -2,6 +2,7 @@
 from .topdown_aic_dataset import TopDownAicDataset
 from .topdown_coco_dataset import TopDownCocoDataset
 from .topdown_coco_wholebody_dataset import TopDownCocoWholeBodyDataset
+from .topdown_coco_with_sigmas_dataset import TopDownCocoWithSigmasDataset
 from .topdown_crowdpose_dataset import TopDownCrowdPoseDataset
 from .topdown_h36m_dataset import TopDownH36MDataset
 from .topdown_halpe_dataset import TopDownHalpeDataset
@@ -27,4 +28,5 @@ __all__ = [
     'TopDownH36MDataset',
     'TopDownHalpeDataset',
     'TopDownPoseTrack18VideoDataset',
+    'TopDownCocoWithSigmasDataset'
 ]

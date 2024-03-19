@@ -9,8 +9,8 @@ BATCH_SIZE = 64
 PADDING = 1.25
 
 _base_ = [
-    '../../../../../_base_/default_runtime.py',
-    '../../../../../_base_/datasets/coco.py'
+    '../../../../_base_/default_runtime.py',
+    '../../../../_base_/datasets/coco.py'
 ]
 evaluation = dict(interval=10, metric='mAP', save_best='AP')
 
@@ -73,12 +73,15 @@ model = dict(
                 num_channels=(48, 96, 192, 384))),
     ),
     keypoint_head=dict(
-        type='TopdownHeatmapSimpleHead',
+        type='TopdownHeatmapFullHeadFromHTM',
         in_channels=48,
         out_channels=channel_cfg['num_output_channels'],
         num_deconv_layers=0,
         extra=dict(final_conv_kernel=1, ),
-        loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True)),
+        loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True),
+        loss_probability=dict(type='BCELoss', use_target_weight=False, loss_weight=0.001),
+        loss_error=dict(type='L1LogLoss', use_target_weight=True),
+    ),
     train_cfg=dict(),
     test_cfg=dict(
         flip_test=True,
@@ -146,7 +149,7 @@ val_pipeline = [
         keys=['img'],
         meta_keys=[
             'image_file', 'center', 'scale', 'rotation', 'bbox_score',
-            'flip_pairs'
+            'flip_pairs', 'orig_joints_3d', 'joints_3d_visible',
         ]),
 ]
 

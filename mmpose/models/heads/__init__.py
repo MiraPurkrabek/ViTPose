@@ -9,6 +9,7 @@ from .interhand_3d_head import Interhand3DHead
 from .temporal_regression_head import TemporalRegressionHead
 from .topdown_heatmap_base_head import TopdownHeatmapBaseHead
 from .topdown_heatmap_frozen_prob_simple_head import TopdownHeatmapFrozenProbSimpleHead
+from .topdown_heatmap_full_vis_head import TopdownHeatmapFullVisHead
 from .topdown_heatmap_full_head import TopdownHeatmapFullHead
 from .topdown_heatmap_full_head_fromHTM import TopdownHeatmapFullHeadFromHTM
 from .topdown_heatmap_multi_stage_head import (TopdownHeatmapMSMUHead,
@@ -29,5 +30,5 @@ __all__ = [
     'HMRMeshHead', 'DeconvHead', 'ViPNASHeatmapSimpleHead', 'CuboidCenterHead',
     'CuboidPoseHead', 'TopdownProbabilityMapSimpleHead', 'TopdownHeatmapProbSimpleHead',
     'Topdown4ProbabilityMapSimpleHead', 'TopdownHeatmapFrozenProbSimpleHead',
-    'TopdownHeatmapSimpleHeadWithError', 'TopdownHeatmapFullHead'
+    'TopdownHeatmapSimpleHeadWithError', 'TopdownHeatmapFullHead', 'TopdownHeatmapFullVisHead',
 ]

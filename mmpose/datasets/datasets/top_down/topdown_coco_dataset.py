@@ -7,6 +7,9 @@ from collections import OrderedDict, defaultdict
 import json_tricks as json
 import numpy as np
 from mmcv import Config, deprecated_api_warning
+
+from sklearn import metrics
+
 # from xtcocotools.cocoeval import COCOeval
 from ._cocoeval import COCOeval
 
@@ -288,6 +291,10 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             boxes = result['boxes']
             image_paths = result['image_paths']
             bbox_ids = result['bbox_ids']
+            if "output_probs" in result:
+                probs = result['output_probs']
+            else:
+                probs = np.ones_like(bbox_ids)
 
             batch_size = len(image_paths)
             for i in range(batch_size):
@@ -299,7 +306,8 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
                     'area': boxes[i][4],
                     'score': boxes[i][5],
                     'image_id': image_id,
-                    'bbox_id': bbox_ids[i]
+                    'bbox_id': bbox_ids[i],
+                    'prob': probs[i]
                 })
         kpts = self._sort_and_unique_bboxes(kpts)
 
@@ -338,9 +346,9 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
         # do evaluation only if the ground truth keypoint annotations exist
         if 'annotations' in self.coco.dataset:
             if return_score:
-                info_str, sorted_matches, sort_idx = self._do_python_keypoint_eval(res_file, return_wrong_images=True)
+                info_str, sorted_matches, sort_idx = self._do_python_keypoint_eval(res_file, return_wrong_images=True, kpts=valid_kpts)
             else:
-                info_str = self._do_python_keypoint_eval(res_file, return_wrong_images=False)
+                info_str = self._do_python_keypoint_eval(res_file, return_wrong_images=False, kpts=valid_kpts)
             name_value = OrderedDict(info_str)
 
         if tmp_folder is not None:
@@ -395,7 +403,7 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
 
         return cat_results
 
-    def _do_python_keypoint_eval(self, res_file, return_wrong_images=False):
+    def _do_python_keypoint_eval(self, res_file, return_wrong_images=False, kpts=None):
         """Keypoint evaluation using COCOAPI."""
         coco_det = self.coco.loadRes(res_file)
         self.coco_eval = COCOeval(
@@ -426,6 +434,60 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             ]
 
         info_str = list(zip(stats_names, self.coco_eval.stats))
+        
+        if len(self.coco.imgs) == len(self.coco.anns):
+            sorted_ids = []
+            gt_probs = []
+            pred_probs = []
+            pred_confs = []
+            for img_k in kpts:
+                for ann_k in img_k:
+                    image_id = ann_k['image_id']
+                    sorted_ids.append(image_id)
+                    pred_probs.append(ann_k['prob'])
+                    pred_kpts = ann_k['keypoints']
+                    if isinstance(pred_kpts, np.ndarray):
+                        pred_kpts = pred_kpts.flatten().tolist()
+                    pred_confs.append(pred_kpts[2::3])
+                    ann = self.coco.imgToAnns[image_id][0]
+                    gt_probs.append(ann['keypoints'][2::3])
+            gt_probs = np.array(gt_probs).flatten().astype(float)
+            pred_probs = np.array(pred_probs).flatten()
+            pred_confs = np.array(pred_confs).flatten()
+            
+            gt_in_out = gt_probs.copy()
+            gt_in_out[gt_in_out == 0] = np.nan
+            gt_in_out[gt_in_out == 1] = 1
+            gt_in_out[gt_in_out == 2] = 1
+            gt_in_out[gt_in_out == 3] = 0
+            in_out_mask = np.isnan(gt_in_out)
+
+            gt_vis_out = gt_probs.copy()
+            gt_vis_out[gt_vis_out == 0] = np.nan
+            gt_vis_out[gt_vis_out == 1] = np.nan
+            gt_vis_out[gt_vis_out == 2] = 1
+            gt_vis_out[gt_vis_out == 3] = 0
+            vis_out_mask = np.isnan(gt_vis_out)
+            
+            y = gt_in_out[~in_out_mask].astype(int)
+            x_probs = pred_probs[~in_out_mask]
+            x_confs = pred_confs[~in_out_mask]
+            roc_auc_prob = metrics.roc_auc_score(y, x_probs)
+            roc_auc_conf = metrics.roc_auc_score(y, x_confs)
+            info_str.append(('io_auc_prob', roc_auc_prob))
+            info_str.append(('io_auc_conf', roc_auc_conf))
+
+            y = gt_vis_out[~vis_out_mask].astype(int)
+            x_probs = pred_probs[~vis_out_mask]
+            x_confs = pred_confs[~vis_out_mask]
+            roc_auc_prob = metrics.roc_auc_score(y, x_probs)
+            roc_auc_conf = metrics.roc_auc_score(y, x_confs)
+            info_str.append(('vo_auc_prob', roc_auc_prob))
+            info_str.append(('vo_auc_conf', roc_auc_conf))
+
+
+        # Remove all tuples with '.' in the first element
+        info_str = [x for x in info_str if '.' not in x[0]]
 
         if return_wrong_images:
             return info_str, sorted_matches, sort_idx

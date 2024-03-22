@@ -353,7 +353,7 @@ class COCOeval:
         if self.extended_oks:
             print("Using extended OKS...")
 
-        self.ious = {(imgId, catId): computeIoU(imgId, catId, original= not self.extended_oks, alpha=self.alpha, beta=self.beta) \
+        self.ious = {(imgId, catId): computeIoU(imgId, catId, original= not self.extended_oks) \
                         for imgId in p.imgIds
                         for catId in catIds}
         
@@ -578,7 +578,7 @@ class COCOeval:
                 # print("OKS", np.sum(np.exp(-e)) / e.shape[0])
         return ious
     
-    def computeExtendedOks(self, imgId, catId, original=False, alpha=None, beta=None):
+    def computeExtendedOks(self, imgId, catId, original=False, padding=1.25):
     
 
         p = self.params
@@ -595,17 +595,10 @@ class COCOeval:
         vars = (sigmas * 2)**2
         k = len(sigmas)
 
-        if alpha is None:
-            alpha = 0.5 * (1 - np.exp(-1)) / (2 - np.exp(-1))
-        if beta is None:
-            beta = 0.5 * (1 - np.exp(-1)) / (2 - np.exp(-1))
         if original:
-            alpha = 0
-            beta = 0
+            padding = 1.0
 
-        assert alpha <= 1 and alpha >= 0, "Alpha is out of interval (0, 1)"
-        assert beta <= 1 and beta >= 0, "Beta is out of interval (0, 1)"
-        assert alpha + beta <= 1, "Sum of alpha and beta is greater than 1"
+        assert padding >= 1.0, "Padding must be greater than or equal to 1.0"
 
         # Prepare ious for each visibility level
         ious = [np.zeros((len(dts), len(gts))) for _ in self.gt_visibilities]
@@ -645,9 +638,16 @@ class COCOeval:
             
             # create bounds for ignore regions(double the gt bbox)
             bb = gt['bbox']
-            x0 = bb[0] - bb[2]; x1 = bb[0] + bb[2] * 2
-            y0 = bb[1] - bb[3]; y1 = bb[1] + bb[3] * 2
-            
+
+            if original:
+                x0 = bb[0] - bb[2]; x1 = bb[0] + bb[2] * 2
+                y0 = bb[1] - bb[3]; y1 = bb[1] + bb[3] * 2
+            else:
+                x0 = bb[0] - (padding-1)/2*bb[2]
+                x1 = bb[0] + bb[2] * padding
+                y0 = bb[1] - (padding-1)/2*bb[3]
+                y1 = bb[1] + bb[3] * padding
+
             for i, dt in enumerate(dts):
 
                 # Load the pred
@@ -671,7 +671,7 @@ class COCOeval:
                     d = np.array(dt['keypoints'])
 
                 xd = d[0::3]; yd = d[1::3]
-                cd = d[2::3]
+                cd = np.clip(d[2::3], 0, 1)
                 if self.confidence_thr is not None:
                     cd[cd < self.confidence_thr] = 0
                     cd[cd >= self.confidence_thr] = 1
@@ -688,8 +688,6 @@ class COCOeval:
                 vis_level = -1
                 for iou, vis_mask in zip(ious, vis_masks):
                     vis_level += 1
-                    alpha_i = alpha
-                    beta_i = beta
 
                     k1 = np.count_nonzero(vis_mask)
                     gt_ignore = gt['ignore'][vis_level]
@@ -699,83 +697,62 @@ class COCOeval:
                         continue
 
                     assert not (gt_ignore and k1 < 0), "k1 is negative but gt is not ignored"
-
-                    ###############################
-                    # Compute visibility similarity
-                    if k1 > 0:
-                        vg_i = vg[vis_mask]
-                        vd_i = vd[vis_mask]
-                        dist_v = abs(vd_i - vg_i)
-                        vis_oks = 1 - np.sum(dist_v) / dist_v.shape[0]
-                    else:
-                        vis_oks = 1.0
-                        alpha = 0.0
-                    
-                    ###############################
-                    # Compute confidence similarity
-                    if k1 > 0:
-                        cg_i = gt_in_img[vis_mask].astype(int)
-                        cd_i = cd[vis_mask]
-                        # inverted_bce = 1 / ( 1+ (BCE(cd_i, cg_i)))
-                        # conf_oks = np.sum(inverted_bce) / inverted_bce.shape[0]
-                        # print()
-                        # print(cd_i)
-                        # print(cg_i)
-                        # print(BCE(cd_i, cg_i))
-                        # print(inverted_bce)
-                        dist_c = abs(cd_i - cg_i)
-                        conf_oks = 1 - np.sum(dist_c) / dist_c.shape[0]
-                        # if vis_level == 3:
-                        #     print(cg_i, cd_i, dist_c, conf_oks)
-                        # print()
-                        # print("conf_oks", conf_oks)
-                        # print("cg", cg_i)
-                        # print("cd", cd_i)
-                        # print("dist", dist_c)
-
-                        if np.all(cg_i == 0):
-                            # If all keypoints are outside the image,
-                            # ignore visibility and location similarity
-                            beta_i = 1.0
-                            alpha_i = 0.0
-                            # print("Everything is outside the image!")
-
-                    else:
-                        conf_oks = 1.0
-                        beta = 0.0
-
+                  
                     ###############################
                     # Compute location similarity
                     if k1 > 0:
                         dx = xd - xg
                         dy = yd - yg
+                        
+                        dist_sq = dx**2 + dy**2
+                        if not original:
+                            # Find the distance to the closest bbox edge
+                            dxe = np.min((xg-x0, x1-xg), axis=0)
+                            dye = np.min((yg-y0, y1-yg), axis=0)
+
+                            # Clip de to (0, inf) as we don't want to penalize
+                            # keypoints that are outside the bbox
+                            de_sq = dxe**2 + dye**2
+                            is_outside = (dxe < 0) | (dye < 0)
+                            de_sq[is_outside] = 0
+
+                            # Final distance is the weighted sum of dx, dy, dxe and dye
+                            # where weight is confidence
+                            p0 = (np.exp(cd)-1) / (np.exp(np.ones_like(cd))-1)
+                            p1 = (np.exp(1-cd)-1) / (np.exp(np.ones_like(cd))-1)
+
+                            dist_sq = (dist_sq * p0**2 +
+                                       de_sq * p1**2 +
+                                       2*p0*p1*np.sqrt(dist_sq)*np.sqrt(de_sq))
+
+                            # breakpoint()
+
                     else:
                         z = np.zeros((k))
                         dx = np.max((z, x0-xd),axis=0)+np.max((z, xd-x1),axis=0)
                         dy = np.max((z, y0-yd),axis=0)+np.max((z, yd-y1),axis=0)
+                        dist_sq = dx**2 + dy**2
 
-                    dist_l = dx**2 + dy**2
+                    
+                    # Normalize by area and sigmas
+                    tmparea = gt['bbox'][3] * gt['bbox'][2] * 0.53
                     if self.use_area:
-                        e = (dist_l) / vars / (gt['area']+np.spacing(1)) / 2
-                    else:
-                        tmparea = gt['bbox'][3] * gt['bbox'][2] * 0.53
-                        e = (dist_l) / vars / (tmparea+np.spacing(1)) / 2
+                        tmparea = gt['area']
+                    e = (dist_sq) / vars / (tmparea+np.spacing(1)) / 2
+                    
                     if k1 > 0:
                         e=e[vis_mask]
+                    
                     loc_oks = np.sum(np.exp(-e)) / e.shape[0]
 
                     ###############################
                     # Compute extended OKS
                     # print(alpha, beta, (1-alpha_i-beta_i), alpha_i, beta_i)
-                    iou[i, j] = (
-                        (1-alpha_i-beta_i) * loc_oks +
-                        alpha_i * vis_oks +
-                        beta_i * conf_oks
-                    )
+                    iou[i, j] = loc_oks
 
-                    self.loc_similarities.append(loc_oks * (1-alpha_i-beta_i))
-                    self.vis_similarities.append(vis_oks * alpha_i)
-                    self.conf_similarities.append(conf_oks * beta_i)
+                    self.loc_similarities.append(loc_oks)
+                    self.vis_similarities.append(0)
+                    self.conf_similarities.append(0)
 
                     # print("(loc) {:.2f} * {:.2f}\t+\t(vis) {:.2f} * {:.2f}\t+\t(conf) {:.2f} * {:.2f} \t=\t{:.2f}".format(
                     #     (1-alpha_i-beta_i), loc_oks,

@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 ROOT = "/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/"
 # ROOT = "/datagrid/personal/purkrmir/data/OOI_eval/coco_mpii_cropped_v2/"
 models = [
-    # ("ViTPose_small_coco_256x192", "vanilla", False),
+    ("ViTPose_small_coco_256x192", "vanilla", False),
     # ("ViTPose_small_coco_256x192_blackout_unfreeze", "black", False),
     ("ViTPose_small_coco_256x192_full_blackout_finetune", "conf", False),
     ("ViTPose_small_coco_256x192_full_blackout_finetune", "prob", True),
@@ -27,13 +27,15 @@ anns = [(str(ann["image_id"]), ann["keypoints"]) for ann in GT["annotations"]]
 anns = sorted(anns, key=lambda x: x[0])
 for ann in anns:
     gt_vis.append(ann[1][2::3])
-gt_vis = np.array(gt_vis).flatten()
+gt_vis = np.array(gt_vis).flatten().astype(float)
 # Ignore keypoints with visibility 0
-ignore_mask = gt_vis > 1
-gt_vis = gt_vis[ignore_mask]
+# ignore_mask = gt_vis > 1
+gt_vis[gt_vis == 0] = np.nan
+gt_vis[gt_vis == 1] = 1
 gt_vis[gt_vis == 3] = 0
-# gt_vis[gt_vis == 1] = 0
 gt_vis[gt_vis == 2] = 1
+ignore_mask = ~np.isnan(gt_vis)
+gt_vis = gt_vis[ignore_mask].astype(int)
 
 print("Before sampling")
 print(np.unique(gt_vis, return_counts=True))

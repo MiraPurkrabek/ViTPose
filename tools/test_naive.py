@@ -592,13 +592,15 @@ def main():
 
         # # Replace confidence for error estimation
         # for o in outputs:
-        #     conf_errs = o["output_errors"]
-        #     conf_errs -= np.min(conf_errs)
-        #     conf_errs /= np.max(conf_errs)
-        #     conf_errs = 1 - conf_errs
+        #     conf_errs = o["output_probs"]
+        #     # conf_errs -= np.min(conf_errs)
+        #     # conf_errs /= np.max(conf_errs)
+        #     # conf_errs = 1 - conf_errs
         #     o["preds"][:, :, -1] = conf_errs.reshape(-1, 17)
 
         dataset.evaluate(outputs, cfg.work_dir, return_score=True, **eval_config)
+
+        # return
 
         out_boxes = np.concatenate([o['boxes'] for o in outputs], axis=0)
         out_preds = np.concatenate([o['preds'] for o in outputs], axis=0)
@@ -634,7 +636,7 @@ def main():
                 "bbox": bbox_cs2xywh(pred_center, pred_scale, pixel_std=200),
                 "prob": prob.squeeze().tolist(),
             }
-            pred_i["keypoints"][:, -1] = prob.squeeze()
+            # pred_i["keypoints"][:, -1] = prob.squeeze()
             confidences.append(np.array(pred[:, 2]))
             gt_bbox = bbox_cs2xywh(meta["center"], meta["scale"], pixel_std=200)
             gt_vis = meta["joints_3d_visible"][:, 0].flatten()

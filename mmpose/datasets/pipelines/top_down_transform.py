@@ -350,7 +350,8 @@ class TopDownGenerateTarget:
                  ignore_zeros=True,
                  normalize=False,
                  probability_map=False,
-                 directional_probabilities=False):
+                 directional_probabilities=False,
+                 with_visibility=False):
         self.save_sigma = sigma
         self.unbiased_encoding = unbiased_encoding
         self.kernel = kernel
@@ -362,6 +363,7 @@ class TopDownGenerateTarget:
         self.normalize = normalize
         self.probability_map = probability_map
         self.directional_probabilities = directional_probabilities
+        self.with_visibility = with_visibility
 
     def _msra_generate_target(self, cfg, joints_3d, joints_3d_visible, sigma):
         """Generate the target heatmap via "MSRA" approach.
@@ -550,6 +552,11 @@ class TopDownGenerateTarget:
                 if directional_probabilities:
                     target = np.zeros((num_joints, heatmap_size[1]* heatmap_size[0] + 4),
                                     dtype=np.float32)
+                elif self.with_visibility:
+                    target = np.zeros((num_joints, heatmap_size[1]* heatmap_size[0] + 2),
+                                    dtype=np.float32)
+                    target[:, -2] = int(prob_is_ooi)
+                    target[:, -1] = (joints_3d_visible[:, 0].squeeze() == 2).astype(int)
                 else:
                     target = np.zeros((num_joints, heatmap_size[1]* heatmap_size[0] + 1),
                                     dtype=np.float32)
@@ -673,6 +680,7 @@ class TopDownGenerateTarget:
 
                     if directional_probabilities:
                         out_of_image_prob = out_of_image_ratios * out_of_image_prob
+    
 
                     # tgt_draw = target_2d.reshape(heatmap_size[1], heatmap_size[0]) * 255
                     # tgt_draw -= tgt_draw.min()
@@ -684,6 +692,11 @@ class TopDownGenerateTarget:
                     
                     # assert out_of_image_prob >= 0 and out_of_image_prob <= 1
                     target_w_pbt = np.append(target_2d, out_of_image_prob.flatten())
+
+                    if self.with_visibility:
+                        v = v == 2
+                        target_w_pbt = np.append(target_w_pbt, v)
+
                     # assert np.allclose(target_w_pbt.sum(), 1)
                     # if not np.allclose(target_w_pbt.sum(), 1):
                     #     print("target_w_pbt.sum() != 1", target_w_pbt.sum())

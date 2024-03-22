@@ -18,7 +18,7 @@ from .topdown_heatmap_base_head import TopdownHeatmapBaseHead
 
 
 @HEADS.register_module()
-class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
+class TopdownHeatmapFullVisHead(TopdownHeatmapBaseHead):
     """Top-down heatmap full head. paper ref: Bin Xiao et al. ``Simple
     Baselines for Human Pose Estimation and Tracking``.
 
@@ -62,6 +62,7 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
                  align_corners=False,
                  loss_keypoint=None,
                  loss_probability=None,
+                 loss_visibility=None,
                  loss_error=None,
                  train_cfg=None,
                  test_cfg=None,
@@ -71,8 +72,12 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
                  freeze_localization_head=False,
                  freeze_probability_head=False,
                  freeze_error_head=False,
+                 freeze_visibility_head=False,
                  detach_prob_head=True,
-                 heatmap_zeros=False,):
+                 detach_visibility_head=True,
+                 mask_visibility=False,
+                 heatmap_zeros=False,
+                 mask_by_probability=False,):
         super().__init__()
 
         self.in_channels = in_channels
@@ -82,6 +87,11 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
             self.probability_loss = build_loss(loss_probability)
         else:
             self.probability_loss = None
+        
+        if loss_visibility is not None:
+            self.visibility_loss = build_loss(loss_visibility)
+        else:
+            self.visibility_loss = None
         
         if loss_error is not None:
             self.error_loss = build_loss(loss_error)
@@ -122,6 +132,12 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
             in_channels, out_channels, freeze_error_head
         )
 
+        self._build_visibility_head(
+            in_channels, out_channels, freeze_visibility_head
+        )
+        self.detach_visibility_head = detach_visibility_head
+        self.mask_visibility = mask_visibility
+        self.mask_by_probability = mask_by_probability
 
     def _build_localication_head(
         self, 
@@ -280,6 +296,54 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
                 param.requires_grad = False
 
 
+    def _build_visibility_head(
+        self, in_channels, out_channels, freeze_visibility_head,
+    ):
+        vis_layers = []
+        kernel_sizes = [(4, 3), (2, 2), (2, 2)]
+        for i in range(len(kernel_sizes)):
+            vis_layers.append(
+                build_conv_layer(
+                    dict(type='Conv2d'),
+                    in_channels=in_channels,
+                    out_channels=in_channels,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1))
+            vis_layers.append(
+                build_norm_layer(dict(type='BN'), in_channels)[1])
+            vis_layers.append(
+                nn.MaxPool2d(kernel_size=kernel_sizes[i], stride=kernel_sizes[i], padding=0))
+            vis_layers.append(self.nonlinearity)
+        vis_layers.append(
+            build_conv_layer(
+                dict(type='Conv2d'),
+                in_channels=384,
+                out_channels=out_channels,
+                kernel_size=1,
+                stride=1,
+                padding=0))
+        vis_layers.append(nn.Sigmoid())
+        self.visibility_layers = nn.Sequential(*vis_layers)
+
+        self.visibility_fuse_layers = nn.Sequential(
+            # Resize visibility vector from out_channels to in_channels
+            build_conv_layer(
+                dict(type='Conv2d'),
+                in_channels=out_channels,
+                out_channels=in_channels,
+                kernel_size=1,
+                stride=1,
+                padding=0),
+            build_norm_layer(dict(type='BN'), in_channels)[1],
+            self.nonlinearity,
+        )
+
+        if freeze_visibility_head:
+            for param in self.visibility_layers.parameters():
+                param.requires_grad = False  
+
+
     def _error_from_heatmaps(self, pred_heatmaps, target_heatmaps):
         if not isinstance(pred_heatmaps, np.ndarray):
             pred_heatmaps = pred_heatmaps.detach().clone().cpu().numpy()
@@ -318,6 +382,12 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
             target_weight (torch.Tensor[N,K,1]):
                 Weights across different joint types.
         """
+
+        # Throw away the last channel = visibility
+        pred_vis = output[:, :, -1].unsqueeze(-1)
+        output = output[:, :, :-1]
+        target_vis = target[:, :, -1].unsqueeze(-1)
+        target = target[:, :, :-1]
 
         # Extract heatmap, probability and error from output
         N, K, _ = output.shape
@@ -363,6 +433,9 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         if self.error_loss is not None:
             losses['error_loss'] = self.error_loss(pred_errors, target_errors, prob_weight)
 
+        if self.visibility_loss is not None:
+            losses['visibility_loss'] = self.visibility_loss(pred_vis, target_vis, target_weight)
+
         return losses
 
 
@@ -383,6 +456,14 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         """
 
         accuracy = dict()
+
+        # Throw away the last channel = visibility
+        pred_vis = output[:, :, -1].unsqueeze(-1)
+        pred_vis = pred_vis.detach().cpu().numpy()
+        output = output[:, :, :-1]
+        target_vis = target[:, :, -1].unsqueeze(-1)
+        target_vis = target_vis.detach().cpu().numpy()
+        target = target[:, :, :-1]
 
         # Extract heatmap, probability and error from output
         N, K, _ = output.shape
@@ -420,6 +501,10 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
             prob_roc_auc = metrics.roc_auc_score(target_probs.flatten(), pred_probs.flatten())
             accuracy['prob_roc_auc'] = float(prob_roc_auc)
 
+            # Calculate visibility accuracy
+            vis_roc_auc = metrics.roc_auc_score(target_vis.flatten(), pred_vis.flatten())
+            accuracy['vis_roc_auc'] = float(vis_roc_auc)
+
             # Calculate accuracy when confidence is considered as probability
             conf_probs = np.max(pred_heatmaps, axis=(2, 3)).squeeze()
             conf_roc_auc = metrics.roc_auc_score(target_probs.flatten(), conf_probs.flatten())
@@ -439,17 +524,24 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
     def forward(self, x):
         """Forward function."""
         # ToDo
-        x_htm = self.forward_localization_head(x)
+        x_vis = self.forward_visibility_head(x)
         x_prob = self.forward_probability_head(x)
         x_err = self.forward_error_head(x)
+
+        if self.mask_by_probability:
+            x_fused = self.fuse_visibility_with_features(x, x_prob)
+        else:
+            x_fused = self.fuse_visibility_with_features(x, x_vis)
+        x_htm = self.forward_localization_head(x_fused)
 
         # Flatten and concatenate the output
         B, C, H, W = x_htm.shape
         x_htm = x_htm.reshape(B, C, -1)
         x_prob = x_prob.reshape(B, C, -1)
         x_err = x_err.reshape(B, C, -1)
+        x_vis = x_vis.reshape(B, C, -1)
 
-        x_out = torch.cat((x_htm, x_prob, x_err), dim=2)
+        x_out = torch.cat((x_htm, x_prob, x_err, x_vis), dim=2)
 
         return x_out
 
@@ -469,6 +561,23 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
             x = x.detach()
         x = x.clone()
         x = self.probability_layers(x)
+        return x
+    
+    
+    def forward_visibility_head(self, x):
+        """Forward function for probability head."""
+        if self.detach_visibility_head:
+            x = x.detach()
+        x = self.visibility_layers(x)
+        return x
+    
+
+    def fuse_visibility_with_features(self, x, visibility):
+        """Fuse visibility with features."""
+        visibility = self.visibility_fuse_layers(visibility)
+        if self.mask_visibility:
+            visibility = visibility.round()
+        x = x * visibility
         return x
 
 
@@ -491,6 +600,10 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
                 Pairs of keypoints which are mirrored.
         """
         output = self.forward(x)
+
+        # Throw away the last channel = visibility
+        output = output[:, :, :-1]
+
         B, C, _ = output.shape
         pred_heatmaps = output[:, :, :-2]
         pred_heatmaps = pred_heatmaps.reshape(B, C, 64, 48)

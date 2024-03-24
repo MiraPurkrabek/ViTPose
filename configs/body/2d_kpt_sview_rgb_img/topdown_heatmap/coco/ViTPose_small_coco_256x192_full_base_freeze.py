@@ -17,7 +17,7 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=5e-4, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=1e-3, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=12, 
@@ -74,9 +74,9 @@ model = dict(
         mlp_ratio=4,
         qkv_bias=True,
         drop_path_rate=0.1,
-        # frozen_stages=11,
-        # freeze_attn=True,
-        # freeze_ffn=True,
+        frozen_stages=11,
+        freeze_attn=True,
+        freeze_ffn=True,
     ),
     keypoint_head=dict(
         type='TopdownHeatmapFullHead',
@@ -140,7 +140,7 @@ train_pipeline = [
     dict(
         type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.3),
     dict(type='TopDownAffine', use_udp=True),
-    # dict(type='RandomBlackMask', mask_prob=0.9, min_mask=0.1, max_mask=0.3),
+    dict(type='RandomBlackMask', mask_prob=0.9, min_mask=0.1, max_mask=0.3),
     dict(type='ToTensor'),
     dict(
         type='NormalizeTensor',

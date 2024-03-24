@@ -17,7 +17,7 @@ _base_ = [
 ]
 evaluation = dict(interval=1, metric='mAP', save_best='AP')
 
-optimizer = dict(type='AdamW', lr=5e-4, betas=(0.9, 0.999), weight_decay=0.1,
+optimizer = dict(type='AdamW', lr=1e-3, betas=(0.9, 0.999), weight_decay=0.1,
                  constructor='LayerDecayOptimizerConstructor', 
                  paramwise_cfg=dict(
                                     num_layers=12, 
@@ -79,7 +79,7 @@ model = dict(
         # freeze_ffn=True,
     ),
     keypoint_head=dict(
-        type='TopdownHeatmapFullHead',
+        type='TopdownHeatmapFullVisHead',
         in_channels=384,
         out_channels=channel_cfg['num_output_channels'],
         num_deconv_layers=2,
@@ -96,13 +96,18 @@ model = dict(
         loss_keypoint=dict(type='JointsMSELoss', use_target_weight=True),
         loss_probability=dict(type='BCELoss', use_target_weight=True),
         loss_error=dict(type='L1LogLoss', use_target_weight=True),
+        loss_visibility=dict(type='BCELoss', use_target_weight=True),
         normalize=True,
         use_prelu=False,
         freeze_localization_head=False,
         freeze_probability_head=False,
         freeze_error_head=False,
+        freeze_visibility_head=False,
         detach_prob_head=True,
+        detach_visibility_head=True,
+        mask_visibility=True,
         heatmap_zeros=False,
+        mask_by_probability=False,
     ),
     train_cfg=dict(),
     test_cfg=dict(
@@ -153,7 +158,8 @@ train_pipeline = [
         target_type=target_type,
         normalize=False,
         probability_map=True,
-        ignore_zeros=True),
+        ignore_zeros=True,
+        with_visibility=True,),
     dict(
         type='Collect',
         keys=['img', 'target', 'target_weight'],

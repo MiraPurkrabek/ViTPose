@@ -52,11 +52,11 @@ def test_generate_target(input_data, save_dir="TargetTest", show=True):
 
 if __name__ == "__main__":
     
-    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_blackout_unfreeze_wprob.py")
+    cfg = Config.fromfile("configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_blackout.py")
     dataset = build_dataset(cfg.data.train)
     shutil.rmtree("TargetTest", ignore_errors=True)
     os.makedirs("TargetTest", exist_ok=True)
-    for i in tqdm(range(10), ascii=True):
+    for i in tqdm(range(20), ascii=True):
         idx = np.random.randint(0, len(dataset))
         print(idx)
         # idx = 52601
@@ -65,21 +65,21 @@ if __name__ == "__main__":
 
         all_targets = np.array(target).reshape(17, -1)
         print("Image {:d}:".format(i))
-        for j, tgt in enumerate(all_targets):
-            print("\tJoint {:d}".format(j), end="")
+        # for j, tgt in enumerate(all_targets):
+        #     print("\tJoint {:d}".format(j), end="")
             
-            if results["target_weight"][j] <= 0:
-                print(" (ignored):")
-            else:
-                print(":")
+        #     if results["target_weight"][j] <= 0:
+        #         print(" (ignored):")
+        #     else:
+        #         print(":")
             
-            print("\t\tshape:     {}".format(tgt.shape))
-            print("\t\tmin:       {}".format(tgt.min()))
-            print("\t\tmean:      {}".format(tgt.mean()))
-            print("\t\tmax:       {}".format(tgt.max()))
-            print("\t\tsum:       {}".format(tgt.sum()))
-            print("\t\tsum [:-1]: {}".format(tgt[:-1].sum()))
-            print("\t\tval:       {}".format(tgt[-1]))
+        #     print("\t\tshape:     {}".format(tgt.shape))
+        #     print("\t\tmin:       {}".format(tgt.min()))
+        #     print("\t\tmean:      {}".format(tgt.mean()))
+        #     print("\t\tmax:       {}".format(tgt.max()))
+        #     print("\t\tsum:       {}".format(tgt.sum()))
+        #     print("\t\tsum [:-1]: {}".format(tgt[:-1].sum()))
+        #     print("\t\tval:       {}".format(tgt[-1]))
 
         
         # If path to original image is available, save it
@@ -168,14 +168,14 @@ if __name__ == "__main__":
             img = cv2.addWeighted(img_copy, 0.3, img, 0.7, 0)
             
             img_copy = cv2.copyMakeBorder(img_copy, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=(100, 100, 100))
-            if len(probs) == 1:
-                probs = [probs[0], probs[0], probs[0], probs[0]]
-            img_copy[:20, :20, :] = 255 * probs[0]
-            img_copy[:20, -20:, :] = 255 * probs[1]
-            img_copy[-20:, :20, :] = 255 * probs[2]
-            img_copy[-20:, -20:, :] = 255 * probs[3]
+            # if len(probs) == 1:
+            #     probs = [probs[0], probs[0], probs[0], probs[0]]
+            # img_copy[:20, :20, :] = 255 * probs[0]
+            # img_copy[:20, -20:, :] = 255 * probs[1]
+            # img_copy[-20:, :20, :] = 255 * probs[2]
+            # img_copy[-20:, -20:, :] = 255 * probs[3]
 
-            cv2.imwrite("TargetTest/{:02d}_img_heatmap_{:02d}.png".format(i, j), img_copy)
+            # cv2.imwrite("TargetTest/{:02d}_img_heatmap_{:02d}.png".format(i, j), img_copy)
 
             # Overlay the heatmap
         cv2.imwrite("TargetTest/{:02d}_img_w_heatmaps.png".format(i), img)

@@ -224,7 +224,7 @@ class RandomBlackMask:
             # Set all pixels outside of the rectangle to black
             mask = np.zeros((h, w), dtype=np.uint8)
             mask[y:y+dh, x:x+dw] = 1
-            img[mask == 0] = 0
+            img[mask == 0] = 120
             results['img'] = img
 
             # Change the visibility of blacked keypoints to v=1
@@ -232,6 +232,68 @@ class RandomBlackMask:
                           (kpts[:, 1] >= y) & (kpts[:, 1] <= y+dh)
             kpts_visible[in_black] = 1
             results['joints_3d_visible'] = kpts_visible
+
+        return results
+
+
+@PIPELINES.register_module()
+class RandomBlackPatches:
+    """Mask random parts of the image with black.
+
+    Required keys:'img', 'joints_3d', 'joints_3d_visible'.
+
+    Modified keys:'img', 'joints_3d_visible'.
+
+    Args:
+        min_mask (float): Minimum part of the image to be masked.
+            Default: 0.0
+        max_mask (float): Maximum part of the image to be masked.
+            Default: 0.5
+        mask_prob (float): Probability of masking the image.
+            Default: 1.0
+    """
+
+    def __init__(self, grid_size=(5, 5), mask_prob=1.0, mask_ratio=0.3):
+        self.grid_size = grid_size
+        self.mask_prob = mask_prob
+        self.mask_ratio = mask_ratio
+        
+    def __call__(self, results):
+        """Perform data augmentation with random masking."""
+        img = results['img']
+
+        if np.random.rand() < self.mask_prob:
+
+            # Split image into grid
+            h, w, _ = img.shape
+            grid_h, grid_w = self.grid_size
+            dh = np.ceil(h / grid_h).astype(int)
+            dw = np.ceil(w / grid_w).astype(int)
+            num_patches = int(self.grid_size[0] * self.grid_size[1])
+            black_patches = np.random.choice([0, 1], num_patches, p=[1-self.mask_ratio, self.mask_ratio])
+            black_patches = black_patches.reshape(grid_h, grid_w).astype(bool)
+
+            kpts_in_black = np.zeros((results['joints_3d'].shape[0], 1), dtype=np.float32)
+
+            for i in range(grid_h):
+                for j in range(grid_w):
+                    if black_patches[i, j]:
+                        # Set all pixels in the patch to black
+                        img[i*dh:(i+1)*dh, j*dw:(j+1)*dw] = 0
+
+                        # Find keypoints in the patch
+                        in_black = (
+                            (results['joints_3d'][:, 0] >= j*dw) &
+                            (results['joints_3d'][:, 0] <= (j+1)*dw) &
+                            (results['joints_3d'][:, 1] >= i*dh) &
+                            (results['joints_3d'][:, 1] <= (i+1)*dh) & 
+                            (results['joints_3d_visible'][:, 0] > 0)
+                        )
+                        kpts_in_black[in_black] = 1
+
+
+            # Change the visibility of blacked keypoints to v=1
+            results['joints_3d_visible'][in_black] = 1
 
         return results
 

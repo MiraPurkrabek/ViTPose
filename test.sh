@@ -9,8 +9,10 @@
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_errEstimate.py"
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_errEstimate_fromHTM.py"
 
-CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_full_blackout_finetune.py"
+# CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_full_blackout_finetune.py"
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_full_fromHTM_blackout_finetune.py"
+
+CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_256x192_full_oks.py"
 
 # CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/hrnet_w48_coco_256x192_udp_fromHTM.py"
 
@@ -20,8 +22,11 @@ CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_2
 # WEIGHTS="models/pretrained/vitpose-s.pth"
 # WEIGHTS="models/pretrained/vitpose-b.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192/best_AP_epoch_204.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192/reproduce_best_AP_epoch_205.pth"
 
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_blackout/best_AP_epoch_50.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_blackout/best_AP_epoch_208.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_maskPatches/best_AP_epoch_207.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_blackout_lre4/best_AP_epoch_33.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_blackout_lre5/best_AP_epoch_31.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_blackout_unfreeze/best_AP_epoch_4.pth"
@@ -37,13 +42,16 @@ CFG="configs/body/2d_kpt_sview_rgb_img/topdown_heatmap/coco/ViTPose_small_coco_2
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_blackout_finetune/best_AP_epoch_91.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_blackout_finetune/zeros_best_AP_epoch_84.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_blackout_finetune/cropped_best_AP_epoch_5.pth"
-WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_blackout_finetune/zeros_fix_epoch_110.pth"
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_blackout_finetune/zeros_fix_epoch_110.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_blackout_finetune/detach_prob_best_AP_epoch_52.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_blackout_finetune/attach_best_AP_epoch_30.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_blackout_finetune/freezeAllButProb_best_AP_epoch_29.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_blackout_zeros_finetune_ignoreNoise/best_AP_epoch_54.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_finetune/best_AP_epoch_91.pth"
 # WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_fromHTM_blackout_finetune/best_AP_epoch_87.pth"
+
+# WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_oks_ppose/ppose_epoch_70.pth"
+WEIGHTS="work_dirs/ViTPose_small_coco_256x192_full_oks/L1_epoch_70.pth"
 
 # WEIGHTS="models/pretrained/hrnet_w48_coco_256x192_udp-2554c524_20210223.pth"
 

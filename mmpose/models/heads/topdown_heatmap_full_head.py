@@ -72,7 +72,8 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
                  freeze_probability_head=False,
                  freeze_error_head=False,
                  detach_prob_head=True,
-                 heatmap_zeros=False,):
+                 heatmap_zeros=False,
+                 oks_as_error=False,):
         super().__init__()
 
         self.in_channels = in_channels
@@ -119,8 +120,9 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         self.heatmap_zeros = heatmap_zeros
 
         self._build_error_head(
-            in_channels, out_channels, freeze_error_head
+            in_channels, out_channels, freeze_error_head, oks_as_error
         )
+        self.oks_as_error = oks_as_error
 
 
     def _build_localication_head(
@@ -245,7 +247,7 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
 
 
     def _build_error_head(
-        self, in_channels, out_channels, freeze_error_head,
+        self, in_channels, out_channels, freeze_error_head, oks_as_error
     ):
         err_layers = []
             
@@ -269,10 +271,15 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
                 dict(type='Conv2d'),
                 in_channels=384,
                 out_channels=out_channels,
+                # Changed for per-keypoint OKS
+                # out_channels=1 if oks_as_error else out_channels,
                 kernel_size=1,
                 stride=1,
                 padding=0))
-        err_layers.append(self.nonlinearity)
+        if oks_as_error:
+            err_layers.append(nn.Sigmoid())
+        else:
+            err_layers.append(self.nonlinearity)
         self.error_layers = nn.Sequential(*err_layers)
 
         if freeze_error_head:
@@ -301,6 +308,71 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         assert (target_errors >= 0).all(), "Euclidean distance cannot be negative"
 
         return target_errors
+    
+    
+    def _oks_from_heatmaps(self, pred_heatmaps, target_heatmaps, prob_weight):
+        if not isinstance(pred_heatmaps, np.ndarray):
+            pred_heatmaps = pred_heatmaps.detach().clone().cpu().numpy()
+        if not isinstance(target_heatmaps, np.ndarray):
+            target_heatmaps = target_heatmaps.detach().clone().cpu().numpy()
+        if not isinstance(prob_weight, np.ndarray):
+            prob_weight = prob_weight.detach().clone().cpu().numpy()
+
+        B, C, _, _ = target_heatmaps.shape
+
+        # Get the GT location from target heatmap
+        gt_coords_coarse, _ = _get_max_preds(target_heatmaps)
+
+        # Get the estimated location from the output heatmap
+        dt_coords_coarse, _ = _get_max_preds(pred_heatmaps)
+
+        # Improve localization with DARK
+        gt_coords = post_dark_udp(gt_coords_coarse, target_heatmaps)
+        dt_coords = post_dark_udp(dt_coords_coarse, pred_heatmaps)
+        
+        # Add probability as visibility
+        gt_coords = gt_coords * prob_weight
+        dt_coords = dt_coords * prob_weight
+        gt_coords = np.concatenate((gt_coords, prob_weight*2), axis=2)
+        dt_coords = np.concatenate((dt_coords, prob_weight*2), axis=2)
+
+        # Calculate the oks
+        target_oks = []
+        oks_weights = []
+        for i in range(len(gt_coords)):
+            gt_kpts = gt_coords[i]
+            dt_kpts = dt_coords[i]
+            valid_gt_kpts = gt_kpts[:, 2] > 0
+            if not valid_gt_kpts.any():
+                # Changed for per-keypoint OKS
+                target_oks.append(np.zeros(C))
+                oks_weights.append(0)
+                continue
+
+            gt_bbox = np.array([
+                0, 0,
+                64, 48,
+            ])
+            gt = {
+                'keypoints': gt_kpts,
+                'bbox': gt_bbox,
+                'area': gt_bbox[2] * gt_bbox[3],
+            }
+            dt = {
+                'keypoints': dt_kpts,
+                'bbox': gt_bbox,
+                'area': gt_bbox[2] * gt_bbox[3],
+            }
+            # Changed for per-keypoint OKS
+            oks = compute_oks(gt, dt, use_area=False, per_kpt=True)
+            target_oks.append(oks)
+            oks_weights.append(1)
+
+        target_oks = np.array(target_oks)
+        oks_weights = np.array(oks_weights)
+        # target_oks = np.repeat(target_oks[:, None], C, axis=1)
+
+        return target_oks, oks_weights
 
 
     def get_loss(self, output, target, target_weight, reduction='mean'):
@@ -330,12 +402,22 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         target_heatmaps = target[:, :, :-1]
         target_heatmaps = target_heatmaps.reshape(N, K, 64, 48)
         target_probs = target[:, :, -1].unsqueeze(-1)
+        
+        # Create 'prob_weight' as the weight of in/out that is detached from target_probs
+        prob_weight = target_probs.detach().clone()
 
         # Calculate the error from the heatmaps
-        target_errors = self._error_from_heatmaps(pred_heatmaps, target_heatmaps)
+        if self.oks_as_error:
+            target_errors, oks_weights  = self._oks_from_heatmaps(pred_heatmaps, target_heatmaps, target_probs)
+            # Changed for per-keypoint OKS
+            # oks_weights = np.expand_dims(oks_weights, axis=-1)  
+            # oks_weights = torch.tensor(oks_weights).float().cuda()
+            oks_weights = prob_weight
+        else:
+            target_errors = self._error_from_heatmaps(pred_heatmaps, target_heatmaps)
+            oks_weights = prob_weight
         target_errors = torch.tensor(target_errors).float().cuda()        
         target_errors = target_errors.unsqueeze(-1)
-        # target_errors = target_errors * (target_weight > 0)
 
         # Find out points, where the predicted error is smaller than the target error
         # and they are in activation map. Set their weight to 0.
@@ -344,9 +426,6 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         # target_weight = target_weight * (1 - noise_mask)
 
         losses = dict()
-
-        # Create 'prob_weight' as the weight of in/out that is detached from target_probs
-        prob_weight = target_probs.detach().clone()
 
         if self.heatmap_zeros:
             heatmap_weight = target_weight
@@ -361,7 +440,10 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
             losses['probability_loss'] = self.probability_loss(pred_probs, target_probs, target_weight)
 
         if self.error_loss is not None:
-            losses['error_loss'] = self.error_loss(pred_errors, target_errors, prob_weight)
+            # Changed for per-keypoint OKS
+            # if self.oks_as_error:
+            #     pred_errors = pred_errors.mean(axis=1)
+            losses['error_loss'] = self.error_loss(pred_errors, target_errors, oks_weights)
 
         return losses
 
@@ -390,6 +472,9 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         pred_heatmaps = pred_heatmaps.reshape(N, K, 64, 48)
         pred_probs = output[:, :, -2].unsqueeze(-1)
         pred_errors = output[:, :, -1].unsqueeze(-1)
+        # Changed for per-keypoint OKS
+        # if self.oks_as_error:
+        #     pred_errors = pred_errors.mean(axis=1)
 
         # Extract heatmap and probability from target
         target_heatmaps = target[:, :, :-1]
@@ -405,8 +490,15 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         target_weight = target_weight.detach().cpu().numpy().squeeze(-1)
 
         # Calculate the error from the heatmaps
-        target_errors = self._error_from_heatmaps(pred_heatmaps, target_heatmaps)
-        target_errors = target_errors * target_weight
+        if self.oks_as_error:
+            target_errors, oks_weights = self._oks_from_heatmaps(pred_heatmaps, target_heatmaps, target_probs)
+            # Changed for per-keypoint OKS
+            # oks_weights = np.expand_dims(oks_weights, axis=-1)
+            oks_weights = target_weight
+        else:
+            target_errors = self._error_from_heatmaps(pred_heatmaps, target_heatmaps)
+            target_errors = target_errors * target_weight
+            oks_weights = target_weight
 
         if self.target_type == 'GaussianHeatmap':
             # Calculate pose accuracy (= localization)
@@ -429,7 +521,7 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
             error_mae = np.abs(
                 target_errors.squeeze() - pred_errors.squeeze()
             )
-            error_mae = (error_mae * (target_weight > 0)).mean()
+            error_mae = (error_mae * (oks_weights > 0)).mean()
             accuracy['error_mae'] = float(error_mae)
             accuracy['error_mae_norm'] = float(error_mae / np.sqrt(64**2 + 48**2))
 
@@ -447,6 +539,11 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         B, C, H, W = x_htm.shape
         x_htm = x_htm.reshape(B, C, -1)
         x_prob = x_prob.reshape(B, C, -1)
+
+        # Changed for per-keypoint OKS
+        # if self.oks_as_error:
+        #     x_err = x_err.reshape(B, 1)
+        #     x_err = x_err.repeat((1, C))
         x_err = x_err.reshape(B, C, -1)
 
         x_out = torch.cat((x_htm, x_prob, x_err), dim=2)
@@ -497,7 +594,8 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         pred_heatmaps = pred_heatmaps.detach().cpu().numpy()
         pred_probs = output[:, :, -2].detach().cpu().numpy()
         pred_errors = output[:, :, -1].detach().cpu().numpy()
-        pred_errors = pred_errors / np.sqrt(64**2 + 48**2)
+        # Changed for per-keypoint OKS
+        # pred_errors = pred_errors / np.sqrt(64**2 + 48**2)
 
         if flip_pairs is not None:
             pred_heatmaps = flip_back(
@@ -653,3 +751,60 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
                 constant_init(m, 1)
             elif isinstance(m, nn.PReLU):
                 constant_init(m, 1)
+
+
+def compute_oks(gt, dt, use_area=True, per_kpt=False):
+    sigmas = np.array(
+                [.26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89])/10.0
+    vars = (sigmas * 2)**2
+    k = len(sigmas)
+    visibility_condition = lambda x: x > 0
+    g = np.array(gt['keypoints']).reshape(k, 3)
+    xg = g[:, 0]; yg = g[:, 1]; vg = g[:, 2]
+    k1 = np.count_nonzero(visibility_condition(vg))
+    bb = gt['bbox']
+    x0 = bb[0] - bb[2]; x1 = bb[0] + bb[2] * 2
+    y0 = bb[1] - bb[3]; y1 = bb[1] + bb[3] * 2
+    
+    d = np.array(dt['keypoints']).reshape((k, 3))
+    xd = d[:, 0]; yd = d[:, 1]
+            
+    if k1>0:
+        # measure the per-keypoint distance if keypoints visible
+        dx = xd - xg
+        dy = yd - yg
+
+    else:
+        # measure minimum distance to keypoints in (x0,y0) & (x1,y1)
+        z = np.zeros((k))
+        dx = np.max((z, x0-xd),axis=0)+np.max((z, xd-x1),axis=0)
+        dy = np.max((z, y0-yd),axis=0)+np.max((z, yd-y1),axis=0)
+        # dx = np.ones(dx.shape) * 100
+        # dy = np.ones(dy.shape) * 100
+
+    if use_area:
+        e = (dx**2 + dy**2) / vars / (gt['area']+np.spacing(1)) / 2
+        # breakpoint()
+        # print("area", gt["area"])
+    else:
+        tmparea = gt['bbox'][3] * gt['bbox'][2] * 0.53
+        # print("tmparea", tmparea)
+        e = (dx**2 + dy**2) / vars / (tmparea+np.spacing(1)) / 2
+        
+    
+    # if k1 > 0:
+    #     e=e[visibility_condition(vg)]
+    #     # e=e[vg > 0]
+    #     # e=e[(vg > 0) & (det_conf > 0.3)]
+
+    if per_kpt:
+        oks = np.exp(-e)
+        if k1 > 0:
+            oks[~visibility_condition(vg)] = 0
+
+    else:
+        if k1 > 0:
+            e=e[visibility_condition(vg)]
+        oks = np.sum(np.exp(-e)) / e.shape[0]
+
+    return oks

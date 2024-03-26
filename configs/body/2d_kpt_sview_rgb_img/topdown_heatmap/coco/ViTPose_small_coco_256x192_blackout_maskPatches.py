@@ -119,10 +119,11 @@ train_pipeline = [
         type='TopDownHalfBodyTransform',
         num_joints_half_body=8,
         prob_half_body=0.3),
-    # dict(
-    #     type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.5),
+    dict(
+        type='TopDownGetRandomScaleRotation', rot_factor=40, scale_factor=0.5),
     dict(type='TopDownAffine', use_udp=True),
-    dict(type='RandomBlackMask', mask_prob=1.0, min_mask=0.05, max_mask=0.2),
+    dict(type='RandomBlackPatches', grid_size=(8, 6), mask_prob=0.6, mask_ratio=0.3),
+    dict(type='RandomBlackMask', mask_prob=0.6, min_mask=0.1, max_mask=0.3),
     dict(type='ToTensor'),
     dict(
         type='NormalizeTensor',

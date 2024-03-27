@@ -10,8 +10,10 @@ from mmcv import Config, deprecated_api_warning
 
 from sklearn import metrics
 
-# from xtcocotools.cocoeval import COCOeval
+from xtcocotools.cocoeval import COCOeval as _COCOeval
 from ._cocoeval import COCOeval
+
+from copy import deepcopy
 
 
 from ....core.post_processing import oks_nms, soft_oks_nms
@@ -406,34 +408,48 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
     def _do_python_keypoint_eval(self, res_file, return_wrong_images=False, kpts=None):
         """Keypoint evaluation using COCOAPI."""
         coco_det = self.coco.loadRes(res_file)
-        self.coco_eval = COCOeval(
-            self.coco,
-            coco_det,
-            'keypoints',
-            self.sigmas,
-            # extended_oks = True,
-            # confidence_thr = None,
-            # alpha = 0.0,
-            # beta = (1 - np.exp(-1)) / (2 - np.exp(-1)),
-            # beta = 0.0,
-            )
-        self.coco_eval.params.useSegm = None
-        self.coco_eval.evaluate()
-        self.coco_eval.accumulate()
-        self.coco_eval.summarize()
+        
+        eval_params = [
+            {"prefix": "", "match_by_bbox": False, "extended": False},
+            {"prefix": "NoMtch_", "match_by_bbox": True, "extended": False},
+            # {"prefix": "Ex_", "match_by_bbox": False, "extended": True},
+        ]
+        info_str = []
+        
+        for param in eval_params:
+            # breakpoint()
+            print("\n", "+"*40)
+            print(f"Eval params: {param}")
+            self.coco_eval = COCOeval(
+                deepcopy(self.coco),
+                deepcopy(coco_det),
+                'keypoints',
+                self.sigmas,
+                match_by_bbox = param["match_by_bbox"],
+                extended_oks = param["extended"],
+                # confidence_thr = None,
+                # alpha = 0.0,
+                # beta = (1 - np.exp(-1)) / (2 - np.exp(-1)),
+                # beta = 0.0,
+                )
+            self.coco_eval.params.useSegm = None
+            self.coco_eval.evaluate()
+            self.coco_eval.accumulate()
+            self.coco_eval.summarize()
 
-        if return_wrong_images:
-            sorted_matches, sort_idx = self._sort_images_by_prediction_score(self.coco_eval)
+            if return_wrong_images:
+                sorted_matches, sort_idx = self._sort_images_by_prediction_score(self.coco_eval)
 
-        try:
-            stats_names = self.coco_eval.stats_names
-        except AttributeError:
-            stats_names = [
-                'AP', 'AP .5', 'AP .75', 'AP (M)', 'AP (L)', 'AR', 'AR .5',
-                'AR .75', 'AR (M)', 'AR (L)'
-            ]
-
-        info_str = list(zip(stats_names, self.coco_eval.stats))
+            try:
+                stats_names = self.coco_eval.stats_names
+            except AttributeError:
+                stats_names = [
+                    'AP', 'AP .5', 'AP .75', 'AP (M)', 'AP (L)', 'AR', 'AR .5',
+                    'AR .75', 'AR (M)', 'AR (L)'
+                ]
+            stats_names = [param['prefix'] + s for s in stats_names]
+            info_str.extend(list(zip(stats_names, self.coco_eval.stats)))
+            # break
         
         if len(self.coco.imgs) == len(self.coco.anns):
             sorted_ids = []
@@ -484,7 +500,6 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             roc_auc_conf = metrics.roc_auc_score(y, x_confs)
             info_str.append(('vo_auc_prob', roc_auc_prob))
             info_str.append(('vo_auc_conf', roc_auc_conf))
-
 
         # Remove all tuples with '.' in the first element
         info_str = [x for x in info_str if '.' not in x[0]]

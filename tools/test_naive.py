@@ -591,16 +591,17 @@ def main():
         print("="*20)
 
         # Replace confidence for error estimation
-        for o in outputs:
-            conf_errs = o["output_errors"]
-            # conf_errs -= np.min(conf_errs)
-            # conf_errs /= np.max(conf_errs)
-            # conf_errs = 1 - conf_errs
-            o["preds"][:, :, -1] = conf_errs.reshape(-1, 17)
+        # for o in outputs:
+        #     conf_errs = o["output_errors"]
+        #     # conf_errs -= np.min(conf_errs)
+        #     # conf_errs /= np.max(conf_errs)
+        #     # conf_errs = 1 - conf_errs
+        #     conf_errs = np.random.rand(*conf_errs.shape) + 0.1
+        #     o["preds"][:, :, -1] = conf_errs.reshape(-1, 17)
 
         dataset.evaluate(outputs, cfg.work_dir, return_score=True, **eval_config)
 
-        # return
+        return
 
         out_boxes = np.concatenate([o['boxes'] for o in outputs], axis=0)
         out_preds = np.concatenate([o['preds'] for o in outputs], axis=0)

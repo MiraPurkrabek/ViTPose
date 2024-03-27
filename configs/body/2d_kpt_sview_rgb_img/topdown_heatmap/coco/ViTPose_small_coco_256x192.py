@@ -1,4 +1,4 @@
-# COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
+COCO_ROOT = '/datagrid/personal/purkrmir/data/COCO/original'
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_TOP/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/PoseFES/COCO_format_seq1/"
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/SyntheticPose/BOTTOM_seq_test/"
@@ -14,7 +14,7 @@
 # COCO_ROOT = "/datagrid/personal/purkrmir/data/pose_experiments/black_masking/ooi_COCO_val/"
 # COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped/'
 # COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_mpii_cropped/'
-COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
+# COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_cropped_v2/'
 # COCO_ROOT = '/datagrid/personal/purkrmir/data/OOI_eval/coco_mpii_cropped_v2/'
 
 

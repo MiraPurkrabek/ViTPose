@@ -88,6 +88,7 @@ class COCOeval:
             confidence_thr=None,
             alpha=None,
             beta=None,
+            match_by_bbox=False,
         ):
         '''
         Initialize CocoEval using coco APIs for gt and dt
@@ -133,6 +134,8 @@ class COCOeval:
         self.loc_similarities = []
         self.vis_similarities = []
         self.conf_similarities = []
+
+        self.match_by_bbox = match_by_bbox
 
     def _prepare(self):
         '''
@@ -264,6 +267,7 @@ class COCOeval:
         
         self._gts = defaultdict(list)       # gt for evaluation
         self._dts = defaultdict(list)       # dt for evaluation
+        # breakpoint()
         for gt in gts:
             self._gts[gt['image_id'], gt['category_id']].append(gt)
         flag_no_part_score = False
@@ -350,6 +354,9 @@ class COCOeval:
         elif 'keypoints' in p.iouType:
             computeIoU = self.computeExtendedOks
         
+        if self.match_by_bbox:
+            print("Matching by bbox...")
+
         if self.extended_oks:
             print("Using extended OKS...")
 
@@ -368,8 +375,7 @@ class COCOeval:
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
         self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet, iou_i=iou_i,
-                                    #   return_matching=True, match_by_bbox=True
-                                    #  match_by_bbox=True,
+                                     match_by_bbox=self.match_by_bbox, return_matching=False,
                                     )
                  for catId in catIds
                  for iou_i in range(len(self.gt_visibilities)+1)
@@ -404,6 +410,7 @@ class COCOeval:
         Detections are sortred from the highest to lowest score before computing `ious`.
         So rows in `ious` are ordered according to detection scores.
         """
+        raise NotImplementedError
         p = self.params
         if p.useCats:
             gt = self._gts[imgId,catId]
@@ -433,6 +440,7 @@ class COCOeval:
         return ious
 
     def computeOks(self, imgId, catId, visibility_condition=lambda x: x > 0):
+        raise NotImplementedError
         p = self.params
         # dimention here should be Nxm
         gts = self._gts[imgId, catId]
@@ -579,15 +587,18 @@ class COCOeval:
         return ious
     
     def computeExtendedOks(self, imgId, catId, original=False, padding=1.25):
-    
 
         p = self.params
         # dimention here should be Nxm
         gts = self._gts[imgId, catId]
         dts = self._dts[imgId, catId]
+        # if self.match_by_bbox:
+        #     inds = np.arange(len(dts))
+        # else:
         inds = np.argsort([-d[self.score_key] for d in dts], kind='mergesort')
         dts = [dts[i] for i in inds]
         if len(dts) > p.maxDets[-1]:
+            print("Truncating detections to maxDets")
             dts = dts[0:p.maxDets[-1]]
         if len(gts) == 0 or len(dts) == 0:
             return [[] for _ in range(len(self.gt_visibilities)+1)]
@@ -750,6 +761,8 @@ class COCOeval:
                     # print(alpha, beta, (1-alpha_i-beta_i), alpha_i, beta_i)
                     iou[i, j] = loc_oks
 
+                    # breakpoint()
+
                     self.loc_similarities.append(loc_oks)
                     self.vis_similarities.append(0)
                     self.conf_similarities.append(0)
@@ -796,6 +809,9 @@ class COCOeval:
         # sort dt highest score first, sort gt ignore last
         gtind = np.argsort([g['_ignore'] for g in gt], kind='mergesort')
         gt = [gt[i] for i in gtind]
+        # if match_by_bbox:
+        #     dtind = np.arange(len(dt))
+        # else:
         dtind = np.argsort([-d[self.score_key] for d in dt], kind='mergesort')
         dt = [dt[i] for i in dtind[0:maxDet]]
         iscrowd = [int(o['iscrowd']) for o in gt]
@@ -827,8 +843,8 @@ class COCOeval:
                         g_bbox = np.array(g["bbox"])
                         g_center = g_bbox[:2] + g_bbox[2:] / 2
                         if abs(d_center - g_center).sum() < 2:
-                            iou = ious[iou_i][dind, gind] if not g["ignore"][iou_i] else np.nan
-                            assigned_pairs.append((d, g, iou))
+                            this_iou = ious[iou_i][dind, gind] if not g["ignore"][iou_i] else np.nan
+                            assigned_pairs.append((d, g, this_iou))
                             dtIg[tind, dind] = gtIg[gind]
                             dtm[tind, dind]  = gt[gind]['id']
                             gtm[tind, gind]  = d['id']
@@ -868,17 +884,29 @@ class COCOeval:
                         m   = -1
 
                         if match_by_bbox:
+                            closest_dist = 20
                             d_center = np.array(d["center"])
                             for gind, g in enumerate(gt):
                                 g_bbox = np.array(g["bbox"])
                                 g_center = g_bbox[:2] + g_bbox[2:] / 2
-                                if abs(d_center - g_center).sum() < 1:
-                                    iou = ious[iou_i][dind, gind] if not g["ignore"][iou_i] else np.nan
-                                    assigned_pairs.append((d, g, iou))
-                                    dtIg[tind, dind] = gtIg[gind]
-                                    dtm[tind, dind]  = gt[gind]['id']
-                                    gtm[tind, gind]  = d['id']
+                                
+                                # if this gt already matched, and not a crowd, continue
+                                if gtm[tind,gind] >= 0 and not iscrowd[gind]:
+                                    continue
+                                # if dt matched to reg gt, and on ignore gt, stop
+                                # since all the rest of g's are ignored as well because of the prior sorting
+                                if m > -1 and gtIg[m] == 0 and gtIg[gind] == 1:
                                     break
+
+                                if iou[dind,gind] < t:
+                                    continue
+                                
+                                abs_dist = abs(d_center - g_center).sum()
+                                if abs_dist < closest_dist:
+                                    closest_dist = abs_dist
+                                    m = gind
+                                    curr_iou = iou[dind,gind]
+
                         else:
                             for gind, g in enumerate(gt):
                                 # if this gt already matched, and not a crowd, continue
@@ -904,6 +932,8 @@ class COCOeval:
                         dtIg[tind, dind] = gtIg[m]
                         dtm[tind, dind]  = gt[m]['id']
                         gtm[tind, m]     = d['id']
+                # if len(gt) > 1:
+                #     breakpoint()
             # set unmatched detections outside of area range to ignore
             a = np.array([d['area'] < aRng[0] or d['area'] > aRng[1] for d in dt]).reshape((1, len(dt)))
             dtIg = np.logical_or(dtIg, np.logical_and(dtm < 0, np.repeat(a, T, 0)))        
@@ -994,7 +1024,12 @@ class COCOeval:
                         dtScores = np.concatenate([e['dtScores'][0:maxDet] for e in E])
                         # different sorting method generates slightly different results.
                         # mergesort is used to be consistent as Matlab implementation.
-                        inds = np.argsort(-dtScores, kind='mergesort')
+                        if self.match_by_bbox:
+                            # dtIds = np.concatenate([e['dtIds'][0:maxDet] for e in E])
+                            # inds = np.argsort(dtIds, kind='mergesort')
+                            inds = np.argsort(-dtScores, kind='mergesort')
+                        else:
+                            inds = np.argsort(-dtScores, kind='mergesort')
                         dtScoresSorted = dtScores[inds]
 
                         dtm  = np.concatenate([e['dtMatches'][:,0:maxDet] for e in E], axis=1)[:,inds]

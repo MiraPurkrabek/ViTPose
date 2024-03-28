@@ -400,6 +400,7 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
 
         # Extract heatmap and probability from target
         target_heatmaps = target[:, :, :-1]
+        nonzero_weights = torch.any(target_heatmaps > 0, dim=-1, keepdim=True)
         target_heatmaps = target_heatmaps.reshape(N, K, 64, 48)
         target_probs = target[:, :, -1].unsqueeze(-1)
         
@@ -430,7 +431,7 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         if self.heatmap_zeros:
             heatmap_weight = target_weight
         else:
-            heatmap_weight = prob_weight
+            heatmap_weight = nonzero_weights
 
         assert not isinstance(self.keypoint_loss, nn.Sequential)
         assert target_heatmaps.dim() == 4 and target_weight.dim() == 3
@@ -595,7 +596,8 @@ class TopdownHeatmapFullHead(TopdownHeatmapBaseHead):
         pred_probs = output[:, :, -2].detach().cpu().numpy()
         pred_errors = output[:, :, -1].detach().cpu().numpy()
         # Changed for per-keypoint OKS
-        # pred_errors = pred_errors / np.sqrt(64**2 + 48**2)
+        if not self.oks_as_error:
+            pred_errors = pred_errors / np.sqrt(64**2 + 48**2)
 
         if flip_pairs is not None:
             pred_heatmaps = flip_back(

@@ -224,7 +224,7 @@ class RandomBlackMask:
             # Set all pixels outside of the rectangle to black
             mask = np.zeros((h, w), dtype=np.uint8)
             mask[y:y+dh, x:x+dw] = 1
-            img[mask == 0] = 120
+            img[mask == 0] = 0
             results['img'] = img
 
             # Change the visibility of blacked keypoints to v=1

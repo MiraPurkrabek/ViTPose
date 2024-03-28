@@ -20,6 +20,8 @@ from ....core.post_processing import oks_nms, soft_oks_nms
 from ...builder import DATASETS
 from ..base import Kpt2dSviewRgbImgTopDownDataset
 
+import warnings
+
 
 @DATASETS.register_module()
 class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
@@ -404,53 +406,79 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             cat_results.extend(result)
 
         return cat_results
+    
+
+    def _eval_keypoints_classification(
+            self, gt, dt, zeros=[3], ones=[1, 2], nan=[0], prefix="", balanced=True, verbose=True
+        ):
+        # Copy to keep the original data
+        gt = gt.copy()
+        dt = dt.copy()
+        
+        info_str = []
+
+        # Filter the gt
+        for n in nan:
+            gt[gt == n] = np.nan
+        for z in zeros:
+            gt[gt == z] = 0
+        for o in ones:
+            gt[gt == o] = 1
+        gt_mask = np.isnan(gt)
+        gt = gt[~gt_mask].astype(int)
+        dt = dt[~gt_mask]
+
+        unique_gt = np.unique(gt)
+        if len(unique_gt) != 2:
+            warnings.warn("There is not 2 unique values in gt", RuntimeWarning)
+            return info_str
+        
+        if balanced:
+            # Take the same amount of in and out kpts
+            n_kpts = min(len(gt[gt == 0]), len(gt[gt == 1]))
+            inds_0 = np.random.choice(np.where(gt == 0)[0], n_kpts, replace=False)
+            inds_1 = np.random.choice(np.where(gt == 1)[0], n_kpts, replace=False)
+            gt = np.concatenate([gt[inds_0], gt[inds_1]])
+            dt = np.concatenate([dt[inds_0], dt[inds_1]])
+
+        if verbose:
+            print("{:s}: There is {} kpts for eval, {} are '0' and {} are '1'".format(
+                prefix.upper(),
+                len(gt), len(gt[gt == 0]), len(gt[gt == 1]) 
+            ))
+        
+        roc_auc = metrics.roc_auc_score(gt, dt)
+        info_str = [(f'{prefix}auc', roc_auc)]
+
+        thresholds = np.arange(0, 1, 0.05)
+        accuracies = np.zeros(len(thresholds))
+        for i, thr in enumerate(thresholds):
+            accuracies[i] = metrics.accuracy_score(gt, dt > thr)
+        
+        best_i = np.argmax(accuracies)
+        best_acc = accuracies[best_i]
+        best_thr = thresholds[best_i]
+
+        if verbose:
+            print("{:s}: The best accuracy is {:.2f}% with threshold {:.2f}".format(
+                prefix.upper(),
+                best_acc*100, best_thr
+            ))
+
+        info_str.append((f'{prefix}best_acc', best_acc))
+        info_str.append((f'{prefix}best_thr', best_thr))
+
+        return info_str
+    
 
     def _do_python_keypoint_eval(self, res_file, return_wrong_images=False, kpts=None):
         """Keypoint evaluation using COCOAPI."""
         coco_det = self.coco.loadRes(res_file)
-        
-        eval_params = [
-            {"prefix": "", "match_by_bbox": False, "extended": False},
-            {"prefix": "NoMtch_", "match_by_bbox": True, "extended": False},
-            # {"prefix": "Ex_", "match_by_bbox": False, "extended": True},
-        ]
+
         info_str = []
-        
-        for param in eval_params:
-            # breakpoint()
-            print("\n", "+"*40)
-            print(f"Eval params: {param}")
-            self.coco_eval = COCOeval(
-                deepcopy(self.coco),
-                deepcopy(coco_det),
-                'keypoints',
-                self.sigmas,
-                match_by_bbox = param["match_by_bbox"],
-                extended_oks = param["extended"],
-                # confidence_thr = None,
-                # alpha = 0.0,
-                # beta = (1 - np.exp(-1)) / (2 - np.exp(-1)),
-                # beta = 0.0,
-                )
-            self.coco_eval.params.useSegm = None
-            self.coco_eval.evaluate()
-            self.coco_eval.accumulate()
-            self.coco_eval.summarize()
+        best_prob_thr = 0.5
+        best_conf_thr = 0.5
 
-            if return_wrong_images:
-                sorted_matches, sort_idx = self._sort_images_by_prediction_score(self.coco_eval)
-
-            try:
-                stats_names = self.coco_eval.stats_names
-            except AttributeError:
-                stats_names = [
-                    'AP', 'AP .5', 'AP .75', 'AP (M)', 'AP (L)', 'AR', 'AR .5',
-                    'AR .75', 'AR (M)', 'AR (L)'
-                ]
-            stats_names = [param['prefix'] + s for s in stats_names]
-            info_str.extend(list(zip(stats_names, self.coco_eval.stats)))
-            # break
-        
         if len(self.coco.imgs) == len(self.coco.anns):
             sorted_ids = []
             gt_probs = []
@@ -471,35 +499,104 @@ class TopDownCocoDataset(Kpt2dSviewRgbImgTopDownDataset):
             pred_probs = np.array(pred_probs).flatten()
             pred_confs = np.array(pred_confs).flatten()
             
-            gt_in_out = gt_probs.copy()
-            gt_in_out[gt_in_out == 0] = np.nan
-            gt_in_out[gt_in_out == 1] = 1
-            gt_in_out[gt_in_out == 2] = 1
-            gt_in_out[gt_in_out == 3] = 0
-            in_out_mask = np.isnan(gt_in_out)
+            info_str.extend(self._eval_keypoints_classification(
+                gt_probs, pred_probs, prefix="io_prob_", balanced=True, verbose=True,
+                zeros=[3], ones=[1, 2], nan=[0],
+            ))
+            info_str.extend(self._eval_keypoints_classification(
+                gt_probs, pred_probs, prefix="vo_prob_", balanced=True, verbose=True,
+                zeros=[3], ones=[2], nan=[0, 1],
+            ))
+            info_str.extend(self._eval_keypoints_classification(
+                gt_probs, pred_confs, prefix="io_conf_", balanced=True, verbose=True,
+                zeros=[3], ones=[1, 2], nan=[0],
+            ))
+            info_str.extend(self._eval_keypoints_classification(
+                gt_probs, pred_confs, prefix="vo_conf_", balanced=True, verbose=True,
+                zeros=[3], ones=[2], nan=[1, 0],
+            ))
 
-            gt_vis_out = gt_probs.copy()
-            gt_vis_out[gt_vis_out == 0] = np.nan
-            gt_vis_out[gt_vis_out == 1] = np.nan
-            gt_vis_out[gt_vis_out == 2] = 1
-            gt_vis_out[gt_vis_out == 3] = 0
-            vis_out_mask = np.isnan(gt_vis_out)
+            if "io_prob_best_thr" in dict(info_str):
+                best_prob_thr = dict(info_str)["io_prob_best_thr"]
+            if "io_conf_best_thr" in dict(info_str):
+                best_conf_thr = dict(info_str)["io_conf_best_thr"]
             
-            y = gt_in_out[~in_out_mask].astype(int)
-            x_probs = pred_probs[~in_out_mask]
-            x_confs = pred_confs[~in_out_mask]
-            roc_auc_prob = metrics.roc_auc_score(y, x_probs)
-            roc_auc_conf = metrics.roc_auc_score(y, x_confs)
-            info_str.append(('io_auc_prob', roc_auc_prob))
-            info_str.append(('io_auc_conf', roc_auc_conf))
+        
+        eval_params = [
+            {"prefix": "", "match_by_bbox": False, "extended": False, "threshold": best_conf_thr},
+        ]
 
-            y = gt_vis_out[~vis_out_mask].astype(int)
-            x_probs = pred_probs[~vis_out_mask]
-            x_confs = pred_confs[~vis_out_mask]
-            roc_auc_prob = metrics.roc_auc_score(y, x_probs)
-            roc_auc_conf = metrics.roc_auc_score(y, x_confs)
-            info_str.append(('vo_auc_prob', roc_auc_prob))
-            info_str.append(('vo_auc_conf', roc_auc_conf))
+        if len(self.coco.imgs) == len(self.coco.anns):
+            eval_params.extend([
+                {"prefix": "ConfEx_", "match_by_bbox": False, "extended": True, "threshold": best_conf_thr},
+                {"prefix": "ProbEx_", "match_by_bbox": False, "extended": True, "threshold": best_prob_thr},
+            ])
+        else:
+            eval_params.append(
+                {"prefix": "NoMtch_", "match_by_bbox": True, "extended": False, "threshold": best_conf_thr},
+            )
+        
+        for param in eval_params:
+            print("\n", "+"*40)
+            print(f"Eval params: {param}")
+            det_copy = deepcopy(coco_det)
+            
+            if "prob" in param["prefix"].lower():
+                # Replace the confidence by the probability
+                for ann in det_copy.dataset["annotations"]:
+                    probs = None
+                    for img_k in kpts:
+                        for ann_k in img_k:
+                            if ann_k["image_id"] == ann["image_id"]:
+                                probs = ann_k["prob"]
+                                break
+                    if isinstance(probs, np.ndarray):
+                        probs = probs.flatten().tolist()
+                    if not probs is None:
+                        ann["keypoints"][2::3] = probs
+
+            self.coco_eval = COCOeval(
+                deepcopy(self.coco),
+                det_copy,
+                'keypoints',
+                self.sigmas,
+                match_by_bbox = param["match_by_bbox"],
+                extended_oks = param["extended"],
+                confidence_thr = param["threshold"],
+                # alpha = 0.0,
+                # beta = (1 - np.exp(-1)) / (2 - np.exp(-1)),
+                # beta = 0.0,
+                )
+            self.coco_eval.params.useSegm = None
+            self.coco_eval.evaluate()
+            self.coco_eval.accumulate()
+            self.coco_eval.summarize()
+
+            if return_wrong_images:
+                sorted_matches, sort_idx = self._sort_images_by_prediction_score(self.coco_eval)
+
+            try:
+                stats_names = self.coco_eval.stats_names
+            except AttributeError:
+                stats_names = [
+                    'AP', 'AP .5', 'AP .75', 'AP (M)', 'AP (L)', 'AR', 'AR .5',
+                    'AR .75', 'AR (M)', 'AR (L)'
+                ]
+            stats_names = [param["prefix"] + s for s in stats_names]
+            new_info_str = list(zip(stats_names, self.coco_eval.stats))
+            
+            # If not vanilla eval, filter out .5, .75, M, L and AR values
+            if param["prefix"] != "":
+                new_info_str = [
+                    x for x in new_info_str if (
+                        '.' not in x[0] and
+                        'M' not in x[0] and
+                        'L' not in x[0] and
+                        'S' not in x[0] and 
+                        'AR' not in x[0])
+                ]
+            info_str.extend(new_info_str)
+            # break
 
         # Remove all tuples with '.' in the first element
         info_str = [x for x in info_str if '.' not in x[0]]

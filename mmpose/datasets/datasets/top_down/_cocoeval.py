@@ -712,31 +712,35 @@ class COCOeval:
                     ###############################
                     # Compute location similarity
                     if k1 > 0:
+                        
+                        # Distance between prediction and GT
                         dx = xd - xg
                         dy = yd - yg
-                        
                         dist_sq = dx**2 + dy**2
+
                         if not original:
-                            # Find the distance to the closest bbox edge
-                            dxe = np.min((xg-x0, x1-xg), axis=0)
-                            dye = np.min((yg-y0, y1-yg), axis=0)
+                            # Distance of prediction to the closes bbox edge
+                            dxe_pred = np.min((xd-x0, x1-xd), axis=0)
+                            dye_pred = np.min((yd-y0, y1-yd), axis=0)
+                            dist_e_pred = dxe_pred**2 + dye_pred**2
 
-                            # Clip de to (0, inf) as we don't want to penalize
-                            # keypoints that are outside the bbox
-                            de_sq = dxe**2 + dye**2
-                            is_outside = (dxe < 0) | (dye < 0)
-                            de_sq[is_outside] = 0
-
-                            # Final distance is the weighted sum of dx, dy, dxe and dye
-                            # where weight is confidence
-                            p0 = (np.exp(cd)-1) / (np.exp(np.ones_like(cd))-1)
-                            p1 = (np.exp(1-cd)-1) / (np.exp(np.ones_like(cd))-1)
-
-                            dist_sq = (dist_sq * p0**2 +
-                                       de_sq * p1**2 +
-                                       2*p0*p1*np.sqrt(dist_sq)*np.sqrt(de_sq))
+                            # Distance of GT to the closest bbox edge
+                            dxe_gt = np.min((xg-x0, x1-xg), axis=0)
+                            dye_gt = np.min((yg-y0, y1-yg), axis=0)
+                            dist_e_gt = dxe_gt**2 + dye_gt**2
 
                             # breakpoint()
+                            # Pred is in AM, GT is out --> d(pred, e)
+                            mask = ~gt_in_img & (cd == 1)
+                            dist_sq[mask] = dist_e_pred[mask]
+
+                            # Pred is out of AM, GT is in --> d(gt, e)
+                            mask = gt_in_img & (cd == 0)
+                            dist_sq[mask] = dist_e_gt[mask]
+
+                            # Both pred and GT are out --> 0
+                            mask = ~gt_in_img & (cd == 0)
+                            dist_sq[mask] = 0
 
                     else:
                         z = np.zeros((k))
